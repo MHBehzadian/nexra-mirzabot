@@ -15,11 +15,11 @@ REPO_URL="https://github.com/MHBehzadian/nexra-mirzabot.git"
 
 N="${N:?set N= (bot number, e.g. 7)}"
 TOKEN="${TOKEN:?set TOKEN= (telegram bot token from @BotFather)}"
-DOMAIN="${DOMAIN:?set DOMAIN= (this bot's domain, A record must already point here)}"
+DOMAIN="${DOMAIN:?set DOMAIN= (the domain of this bot, A record must already point here)}"
 ADMIN="${ADMIN:?set ADMIN= (your numeric telegram id)}"
 DBPASS="${DBPASS:-$(openssl rand -hex 8)}"
 NEXRA_SECRET="${NEXRA_SECRET:?set NEXRA_SECRET= (the secret code that gates panel management)}"
-CERT_EMAIL="${CERT_EMAIL:?set CERT_EMAIL= (email for Let'\''s Encrypt)}"
+CERT_EMAIL="${CERT_EMAIL:?set CERT_EMAIL= (email for the SSL certificate)}"
 BACKUP_MINUTE="${BACKUP_MINUTE:-$((RANDOM % 60))}"
 
 DBNAME="mirzabot${N}"

@@ -270,8 +270,14 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['add_panel']) {
     $valueteststatus = "ontestshowpanel";
     $stauts = "activepanel";
     $on_hold = "offonhold";
-    $stmt = $pdo->prepare("INSERT INTO marzban_panel (name_panel,url_panel,username_panel,password_panel,type,inboundid,sublink,configManual,MethodUsername,statusTest,status,onholdstatus,marzban_url_direct,marzban_username_direct,marzban_password_direct) VALUES (?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?,?)");
-    $stmt->execute([$userdata['name'], $userdata['url_panel'], $userdata['username_panel'], $userdata['password_panel'], $userdata['type'], $inboundid, $sublink, $config, $textbotlang['users']['customidAndRandom'], $valueteststatus, $stauts, $on_hold, $text, $userdata['username_panel'], $userdata['password_panel']]);
+    try {
+        $stmt = $pdo->prepare("INSERT INTO marzban_panel (name_panel,url_panel,username_panel,password_panel,type,inboundid,sublink,configManual,MethodUsername,statusTest,status,onholdstatus,marzban_url_direct,marzban_username_direct,marzban_password_direct) VALUES (?, ?, ?, ?, ?,?,?,?,?,?,?,?,?,?,?)");
+        $stmt->execute([$userdata['name'], $userdata['url_panel'], $userdata['username_panel'], $userdata['password_panel'], $userdata['type'], $inboundid, $sublink, $config, $textbotlang['users']['customidAndRandom'], $valueteststatus, $stauts, $on_hold, $text, $userdata['username_panel'], $userdata['password_panel']]);
+    } catch (Exception $e) {
+        step('home', $from_id);
+        sendmessage($from_id, "❌ ذخیره‌ی پنل انجام نشد:\n<code>" . htmlspecialchars($e->getMessage()) . "</code>\n\nاگر خطا درباره‌ی ستون‌های marzban_..._direct است، یک‌بار آدرس دامنه‌ی بات + /table.php را در مرورگر باز کنید و دوباره تلاش کنید.", $keyboardadmin, 'HTML');
+        return;
+    }
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['addedpanel'], $backadmin, 'HTML');
     sendmessage($from_id, "🥳", $keyboardadmin, 'HTML');
     sendmessage($from_id, $textbotlang['Admin']['managepanel']['notenexra'], null, 'HTML');

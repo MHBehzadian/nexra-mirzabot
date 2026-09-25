@@ -222,6 +222,9 @@ try {
         onholdstatus varchar(200) NULL,
         datelogin TEXT NULL,
         inbounds TEXT NULL,
+        marzban_url_direct varchar(500) NULL,
+        marzban_username_direct varchar(200) NULL,
+        marzban_password_direct varchar(200) NULL,
         proxies TEXT NULL)
         ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
         if (!$result) {
