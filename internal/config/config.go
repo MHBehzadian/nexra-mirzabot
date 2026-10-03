@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 )
 
 type Config struct {
@@ -212,6 +213,14 @@ func (c *Config) Write(path string) error {
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, []byte(strings.Join(lines, "\n")+"\n"), 0600); err != nil {
 		return err
+	}
+	// rewriting an existing config keeps its mode and group, so a service
+	// running as its own user (root:nexrabot 0640) can still read it
+	if st, err := os.Stat(path); err == nil {
+		_ = os.Chmod(tmp, st.Mode().Perm())
+		if sys, ok := st.Sys().(*syscall.Stat_t); ok {
+			_ = os.Chown(tmp, int(sys.Uid), int(sys.Gid))
+		}
 	}
 	return os.Rename(tmp, path)
 }

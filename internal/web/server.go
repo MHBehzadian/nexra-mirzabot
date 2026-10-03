@@ -98,7 +98,7 @@ func (s *Server) Handler() http.Handler {
 			http.Error(w, "db down", 503)
 			return
 		}
-		io.WriteString(w, "ok")
+		io.WriteString(w, "ok nexrabot "+bot.Version)
 	})
 	if s.API != nil {
 		mux.Handle("/api/", s.API)

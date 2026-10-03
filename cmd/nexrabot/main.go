@@ -6,10 +6,13 @@
 //	nexrabot schema       -c /etc/nexrabot/bot7.env
 //	nexrabot set-webhook  -c /etc/nexrabot/bot7.env
 //	nexrabot keys         -c /etc/nexrabot/bot7.env
+//	nexrabot check        -c /etc/nexrabot/bot7.env
+//	nexrabot db-dump      -c /etc/nexrabot/bot7.env --out /root/bot7.sql.gz
 //	nexrabot autopay-test -c ... parse | status | send <amount> | send-raw <text>
 package main
 
 import (
+	"compress/gzip"
 	"context"
 	"errors"
 	"flag"
@@ -17,6 +20,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"os/exec"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -42,6 +46,9 @@ commands:
   schema        create/upgrade the database tables (safe to repeat)
   set-webhook   point the Telegram webhook at this bot
   keys          print the management API keys for Nexra Panel
+  check         test the database, the schema and the bot token
+  init-config   write a config file for a new bot (used by install.sh)
+  db-dump       back up the bot's database (mysqldump, gzipped)
   autopay-test  check the bank SMS parser / simulate a deposit
   version       print the version`)
 	os.Exit(2)
@@ -65,6 +72,12 @@ func main() {
 		cmdWebhook(args)
 	case "keys":
 		cmdKeys(args)
+	case "check":
+		cmdCheck(args)
+	case "init-config":
+		cmdInitConfig(args)
+	case "db-dump":
+		cmdDump(args)
 	case "autopay-test":
 		cmdAutopayTest(args)
 	case "version", "--version", "-v":
@@ -156,6 +169,7 @@ func cmdMigrate(args []string) {
 	listen := fs.String("listen", "127.0.0.1:8080", "address the Go bot will listen on")
 	dataDir := fs.String("data-dir", "/var/lib/nexrabot", "data directory")
 	cleanCron := fs.Bool("clean-crontab", true, "remove this bot's /cron/*.php crontab lines (the Go bot runs them itself)")
+	skipDB := fs.Bool("skip-db", false, "only write the config; do not touch the database or the crontab")
 	_ = fs.Parse(args)
 	if *dir == "" || *out == "" {
 		die("--php-dir and --out are required")
@@ -182,6 +196,9 @@ func cmdMigrate(args []string) {
 		die("writing %s: %v", *out, err)
 	}
 	fmt.Println("config written:", *out)
+	if *skipDB {
+		return
+	}
 
 	d, err := db.Open(cfg.DSN())
 	if err != nil {
@@ -317,4 +334,111 @@ func cmdAutopayTest(args []string) {
 	default:
 		die("commands: parse | status | send <amount> | send-raw <text>")
 	}
+}
+
+func cmdCheck(args []string) {
+	fs := flag.NewFlagSet("check", flag.ExitOnError)
+	cfg := loadConfig(fs, args)
+	failed := false
+	d, err := db.Open(cfg.DSN())
+	if err != nil {
+		fmt.Println("database:  FAIL", err)
+		failed = true
+	} else {
+		fmt.Printf("database:  ok (%d users, %d services, %d panels)\n",
+			d.Count("SELECT COUNT(*) FROM user"), d.Count("SELECT COUNT(*) FROM invoice"), d.Count("SELECT COUNT(*) FROM marzban_panel"))
+	}
+	t := tg.New(cfg.BotToken, cfg.TelegramAPI, cfg.TelegramProxy)
+	me, err := t.GetMe()
+	if err != nil {
+		fmt.Println("telegram:  FAIL", err)
+		failed = true
+	} else {
+		fmt.Println("telegram:  ok @" + me.Username)
+		if cfg.BotUsername != "" && !strings.EqualFold(me.Username, cfg.BotUsername) {
+			fmt.Println("           warning: BOT_USERNAME in the config is @" + cfg.BotUsername)
+		}
+	}
+	if failed {
+		os.Exit(1)
+	}
+}
+
+// cmdDump runs mysqldump with the config's credentials (passed through a
+// private defaults file, never on the command line) and gzips the result.
+func cmdDump(args []string) {
+	fs := flag.NewFlagSet("db-dump", flag.ExitOnError)
+	out := fs.String("out", "", "file to write (.sql.gz)")
+	cfg := loadConfig(fs, args)
+	if *out == "" {
+		die("--out is required")
+	}
+	defs, err := os.CreateTemp("", "nexrabot-my-*.cnf")
+	if err != nil {
+		die("%v", err)
+	}
+	defer os.Remove(defs.Name())
+	fmt.Fprintf(defs, "[client]\nuser=%s\npassword=\"%s\"\n", cfg.DBUser, strings.NewReplacer(`\`, `\\`, `"`, `\"`).Replace(cfg.DBPass))
+	if cfg.DBSocket != "" {
+		fmt.Fprintf(defs, "socket=%s\n", cfg.DBSocket)
+	} else {
+		fmt.Fprintf(defs, "host=%s\nport=%s\n", cfg.DBHost, cfg.DBPort)
+	}
+	defs.Close()
+	f, err := os.OpenFile(*out+".tmp", os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
+	if err != nil {
+		die("%v", err)
+	}
+	gz := gzip.NewWriter(f)
+	dump := "mysqldump"
+	if _, err := exec.LookPath(dump); err != nil {
+		dump = "mariadb-dump"
+	}
+	cmd := exec.Command(dump, "--defaults-extra-file="+defs.Name(), "--single-transaction", "--quick",
+		"--default-character-set=utf8mb4", "--no-tablespaces", cfg.DBName)
+	cmd.Stdout = gz
+	cmd.Stderr = os.Stderr
+	runErr := cmd.Run()
+	if err := gz.Close(); err != nil && runErr == nil {
+		runErr = err
+	}
+	if err := f.Close(); err != nil && runErr == nil {
+		runErr = err
+	}
+	if runErr != nil {
+		os.Remove(*out + ".tmp")
+		die("dump failed: %v", runErr)
+	}
+	if err := os.Rename(*out+".tmp", *out); err != nil {
+		die("%v", err)
+	}
+	st, _ := os.Stat(*out)
+	fmt.Printf("database %s saved to %s (%d bytes)\n", cfg.DBName, *out, st.Size())
+}
+
+func cmdInitConfig(args []string) {
+	fs := flag.NewFlagSet("init-config", flag.ExitOnError)
+	out := fs.String("out", "", "config file to write")
+	c := &config.Config{DBHost: "localhost", DBPort: "3306", DataDir: "/var/lib/nexrabot"}
+	fs.StringVar(&c.BotToken, "token", "", "bot token")
+	fs.StringVar(&c.AdminID, "admin", "", "numeric Telegram id of the main admin")
+	fs.StringVar(&c.Domain, "domain", "", "domain the webhook is served on")
+	fs.StringVar(&c.BotUsername, "bot-username", "", "bot username")
+	fs.StringVar(&c.NexraSecret, "secret", "", "secret code for panel management")
+	fs.StringVar(&c.DBName, "db-name", "", "database name")
+	fs.StringVar(&c.DBUser, "db-user", "", "database user")
+	fs.StringVar(&c.DBPass, "db-pass", os.Getenv("NEXRABOT_INIT_DB_PASS"), "database password (or NEXRABOT_INIT_DB_PASS)")
+	fs.StringVar(&c.Listen, "listen", "127.0.0.1:8080", "address to listen on")
+	_ = fs.Parse(args)
+	if *out == "" || c.BotToken == "" || c.AdminID == "" || c.Domain == "" || c.DBName == "" || c.DBUser == "" {
+		die("--out, --token, --admin, --domain, --db-name and --db-user are required")
+	}
+	if _, err := os.Stat(*out); err == nil {
+		die("%s already exists", *out)
+	}
+	c.APIOwnerKey, c.APIManagerKey, c.WebhookSecret = config.RandomKey(24), config.RandomKey(24), config.RandomKey(16)
+	if err := c.Write(*out); err != nil {
+		die("%v", err)
+	}
+	fmt.Println("config written:", *out)
 }

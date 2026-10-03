@@ -11,6 +11,7 @@ import (
 	"mime/multipart"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"time"
 )
@@ -51,6 +52,78 @@ func (c *Client) logf(format string, a ...any) {
 // Call sends a method with JSON parameters. Nil values are dropped, the way
 // an unset PHP array entry would be.
 func (c *Client) Call(method string, params map[string]any) Response {
+	r := c.call(method, params)
+	if !r.OK && r.ErrorCode == 400 {
+		// Coloured buttons, premium-emoji button icons and <tg-emoji> in text
+		// are extras: if Telegram refuses them (owner without Premium, a stale
+		// emoji id, an older server) send the message plain rather than not at all.
+		if plain, changed := withoutExtras(params); changed {
+			c.logf("tg %s: retrying without button styles/custom emoji (%s)", method, r.Description)
+			return c.call(method, plain)
+		}
+	}
+	return r
+}
+
+var tgEmojiRe = regexp.MustCompile(`(?s)<tg-emoji emoji-id="[0-9]+">(.*?)</tg-emoji>`)
+
+// withoutExtras copies params without button style/icon fields and with
+// <tg-emoji> tags reduced to their fallback emoji.
+func withoutExtras(params map[string]any) (map[string]any, bool) {
+	out := make(map[string]any, len(params))
+	changed := false
+	for k, v := range params {
+		out[k] = v
+		switch k {
+		case "reply_markup":
+			b, err := json.Marshal(v)
+			if err != nil {
+				continue
+			}
+			var m any
+			if json.Unmarshal(b, &m) != nil {
+				continue
+			}
+			if stripKeys(m, "style", "icon_custom_emoji_id") {
+				out[k] = m
+				changed = true
+			}
+		case "text", "caption":
+			if s, ok := v.(string); ok && tgEmojiRe.MatchString(s) {
+				out[k] = tgEmojiRe.ReplaceAllString(s, "$1")
+				changed = true
+			}
+		}
+	}
+	return out, changed
+}
+
+func stripKeys(v any, keys ...string) bool {
+	changed := false
+	switch x := v.(type) {
+	case map[string]any:
+		for _, k := range keys {
+			if _, ok := x[k]; ok {
+				delete(x, k)
+				changed = true
+			}
+		}
+		for _, e := range x {
+			if stripKeys(e, keys...) {
+				changed = true
+			}
+		}
+	case []any:
+		for _, e := range x {
+			if stripKeys(e, keys...) {
+				changed = true
+			}
+		}
+	}
+	return changed
+}
+
+func (c *Client) call(method string, params map[string]any) Response {
 	clean := map[string]json.RawMessage{}
 	for k, v := range params {
 		if v == nil {
