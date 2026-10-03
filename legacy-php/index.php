@@ -18,6 +18,7 @@ require_once 'text.php';
 require_once 'keyboard.php';
 require_once 'functions.php';
 require_once 'panels.php';
+require_once 'autopaylib.php';
 require_once 'vendor/autoload.php';
 
 use Endroid\QrCode\Encoding\Encoding;
@@ -2063,8 +2064,20 @@ if ($text == $datatextbot['text_Add_Balance'] || $text == "/wallet") {
 } elseif ($user['step'] == "get_step_payment") {
     if ($datain == "cart_to_offline") {
         $PaySetting = select("PaySetting", "ValuePay", "NamePay", "CartDescription", "select")['ValuePay'];
-        $Processing_value = number_format($user['Processing_value']);
-        $textcart = sprintf($textbotlang['users']['moeny']['carttext'], $Processing_value, $PaySetting);
+        $autopay_note = "";
+        $autopay_amount = intval($user['Processing_value']);
+        if (autopay_enabled()) {
+            $reserved = autopay_reserve($from_id, $user['Processing_value']);
+            if ($reserved) {
+                $autopay_amount = intval($reserved['amount']);
+                update("user", "Processing_value", $autopay_amount, "id", $from_id);
+                $user['Processing_value'] = $autopay_amount;
+                $autopay_note = autopay_price_note($autopay_amount);
+            }
+        }
+        $autopay_waiting = ($autopay_note !== "");
+        $Processing_value = number_format($autopay_amount);
+        $textcart = sprintf($textbotlang['users']['moeny']['carttext'], $Processing_value, $PaySetting) . $autopay_note;
         preg_match_all('/\d+/', $PaySetting, $Matches);
         if (!empty($Matches[0]) && intval($setting['copy_cart']) == 1) {
             $peymentSettings['card_number'] = implode('', $Matches[0]);
@@ -2075,7 +2088,9 @@ if ($text == $datatextbot['text_Add_Balance'] || $text == "/wallet") {
             deletemessage($from_id, $message_id);
             sendmessage($from_id, $textcart, $backuser, 'HTML');
         }
-        step('cart_to_cart_user', $from_id);
+        // When the deposit confirms itself there is nothing to ask the customer
+        // for, so the bot stops waiting for a receipt photo.
+        step($autopay_waiting ? 'home' : 'cart_to_cart_user', $from_id);
     }
     if ($datain == "aqayepardakht") {
         if ($user['Processing_value'] < 5000) {
@@ -2324,6 +2339,10 @@ if (preg_match('/Confirmpay_user_(\w+)_(\w+)/', $datain, $dataget)) {
     $stmt->bindParam(6, $Payment_Method);
     $stmt->bindParam(7, $invoice);
     $stmt->execute();
+    $autopay_open = autopay_open_order($from_id);
+    if ($autopay_open && intval($autopay_open['amount']) == intval($user['Processing_value'])) {
+        autopay_attach_order($autopay_open['id'], $randomString);
+    }
     if ($user['Processing_value_tow'] == "getconfigafterpay") {
         sendmessage($from_id, $textbotlang['users']['Balance']['Send-receip-buy'], $keyboard, 'HTML');
     } else {

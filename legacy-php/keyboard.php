@@ -74,6 +74,7 @@ $keyboardadmin = json_encode([
         [['text' => $textbotlang['Admin']['keyboardadmin']['admin_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['bot_text_settings']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['user_services']], ['text' => $textbotlang['Admin']['keyboardadmin']['user_search']], ['text' => $textbotlang['Admin']['keyboardadmin']['send_message']]],
         [['text' => $textbotlang['Admin']['keyboardadmin']['tutorial_section']], ['text' => $textbotlang['Admin']['keyboardadmin']['settings']]],
+        [['text' => '💳 تأیید خودکار پرداخت']],
         [['text' => $textbotlang['users']['backhome']]]
     ],
     'resize_keyboard' => true

@@ -805,6 +805,112 @@ if ($text == $textbotlang['Admin']['keyboardadmin']['shop_section']) {
     step('home', $from_id);
 }
 #-------------------------#
+#-------------- Autopay (automatic card-to-card confirmation) --------------#
+function autopay_panel_text()
+{
+    global $pdo, $domainhosts;
+    $s = autopay_settings();
+    $on = $s['status'] === 'on';
+
+    $seen = "—";
+    if (!empty($s['last_seen'])) {
+        $ago = time() - strtotime($s['last_seen']);
+        if ($ago < 120) {
+            $seen = "همین الان ✅";
+        } elseif ($ago < 3600) {
+            $seen = intval($ago / 60) . " دقیقه پیش" . ($ago > 900 ? " ⚠️" : " ✅");
+        } else {
+            $seen = intval($ago / 3600) . " ساعت پیش ⚠️";
+        }
+    }
+
+    $open = $pdo->query("SELECT COUNT(*) FROM autopay_order WHERE status = 'open'")->fetchColumn();
+    $paid = $pdo->query("SELECT COUNT(*) FROM autopay_order WHERE status = 'paid'")->fetchColumn();
+    $sms = $pdo->query("SELECT COUNT(*) FROM autopay_sms")->fetchColumn();
+
+    $text = "💳 <b>تأیید خودکار پرداخت</b>\n\n"
+        . "وضعیت: " . ($on ? "روشن ✅" : "خاموش ⛔️") . "\n"
+        . "آخرین ارتباط گوشی: " . $seen . "\n"
+        . (empty($s['device_info']) ? "" : "دستگاه: " . $s['device_info'] . "\n")
+        . "\nپرداخت‌های در انتظار واریز: " . $open . "\n"
+        . "پرداخت‌های خودکار تأییدشده: " . $paid . "\n"
+        . "پیامک‌های دریافتی: " . $sms . "\n\n"
+        . "آدرس سرور برای برنامه:\n<code>https://" . $domainhosts . "/autopay.php</code>";
+
+    return $text;
+}
+
+function autopay_panel_keyboard()
+{
+    $s = autopay_settings();
+    $on = $s['status'] === 'on';
+    return json_encode([
+        'inline_keyboard' => [
+            [['text' => $on ? '⛔️ خاموش کردن' : '✅ روشن کردن', 'callback_data' => 'autopay_toggle']],
+            [['text' => '🔑 نمایش کلید اتصال', 'callback_data' => 'autopay_key']],
+            [['text' => '♻️ ساخت کلید جدید', 'callback_data' => 'autopay_newkey']],
+            [['text' => '📨 آخرین پیامک‌ها', 'callback_data' => 'autopay_sms'], ['text' => '🧾 در انتظار واریز', 'callback_data' => 'autopay_orders']],
+            [['text' => '🔄 بروزرسانی', 'callback_data' => 'autopay_home']],
+        ]
+    ]);
+}
+
+if ($text == '💳 تأیید خودکار پرداخت') {
+    sendmessage($from_id, autopay_panel_text(), autopay_panel_keyboard(), 'HTML');
+    step('home', $from_id);
+}
+if ($datain == "autopay_home") {
+    Editmessagetext($from_id, $message_id, autopay_panel_text(), autopay_panel_keyboard());
+}
+if ($datain == "autopay_toggle") {
+    $s = autopay_settings();
+    autopay_set('status', $s['status'] === 'on' ? 'off' : 'on');
+    Editmessagetext($from_id, $message_id, autopay_panel_text(), autopay_panel_keyboard());
+}
+if ($datain == "autopay_key" || $datain == "autopay_newkey") {
+    if ($datain == "autopay_newkey") {
+        autopay_set('device_key', bin2hex(random_bytes(24)));
+        autopay_set('last_seen', null);
+    }
+    $s = autopay_settings();
+    $pairing = 'NXP1.' . rtrim(strtr(base64_encode(json_encode(array(
+        'u' => 'https://' . $domainhosts . '/autopay.php',
+        'k' => $s['device_key'],
+    ))), '+/', '-_'), '=');
+    $t = "🔑 <b>کلید اتصال برنامه</b>\n\n"
+        . "این رشته را در برنامه‌ی اندروید جای‌گذاری کن:\n\n"
+        . "<code>" . $pairing . "</code>\n\n"
+        . "⚠️ این کلید مثل رمز است؛ هرکس داشته باشد می‌تواند پرداخت جعلی ثبت کند. "
+        . "اگر جایی لو رفت، «ساخت کلید جدید» را بزن.";
+    sendmessage($from_id, $t, null, 'HTML');
+}
+if ($datain == "autopay_sms") {
+    $rows = $pdo->query("SELECT * FROM autopay_sms ORDER BY id DESC LIMIT 8")->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        $t = "هنوز پیامکی نرسیده.";
+    } else {
+        $t = "📨 <b>آخرین پیامک‌ها</b>\n\n";
+        foreach ($rows as $r) {
+            $t .= "• " . $r['received_at'] . " — " . $r['sender'] . "\n"
+                . "   مبلغ: " . number_format($r['amount']) . " | " . $r['direction'] . " | <b>" . $r['status'] . "</b>\n";
+        }
+    }
+    sendmessage($from_id, $t, null, 'HTML');
+}
+if ($datain == "autopay_orders") {
+    $rows = $pdo->query("SELECT * FROM autopay_order WHERE status = 'open' ORDER BY id DESC LIMIT 10")->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) {
+        $t = "هیچ پرداختی در انتظار واریز نیست.";
+    } else {
+        $t = "🧾 <b>در انتظار واریز</b>\n\n";
+        foreach ($rows as $r) {
+            $t .= "• کاربر <code>" . $r['id_user'] . "</code> — باید <b>" . number_format($r['amount']) . "</b> تومان بزند"
+                . " (قیمت " . number_format($r['base_price']) . ")\n   از " . $r['created_at'] . "\n";
+        }
+    }
+    sendmessage($from_id, $t, null, 'HTML');
+}
+#-------------------------#
 if ($text == $textbotlang['Admin']['keyboardadmin']['admin_section']) {
     sendmessage($from_id, $textbotlang['users']['selectoption'], $admin_section_panel, 'HTML');
 }
@@ -833,6 +939,7 @@ if (preg_match('/Confirm_pay_(\w+)/', $datain, $dataget)) {
         );
         return;
     }
+    autopay_close_by_order($order_id, 'manual');
     DirectPayment($order_id);
     $keyboard_accept = json_encode([
         'inline_keyboard' => [
@@ -874,6 +981,7 @@ if (preg_match('/reject_pay_(\w+)/', $datain, $datagetr)) {
         return;
     }
     update("Payment_report", "payment_Status", "reject", "id_order", $id_order);
+    autopay_close_by_order($id_order, 'rejected');
     sendmessage($from_id, $textbotlang['Admin']['Payment']['Reasonrejecting'], $backadmin, 'HTML');
     step('reject-dec', $from_id);
     Editmessagetext($from_id, $message_id, $text_callback, null);

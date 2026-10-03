@@ -669,3 +669,49 @@ foreach ($nexra_columns as $nexra_column => $nexra_type) {
         echo "Could not add $nexra_column: " . $e->getMessage() . "<br>";
     }
 }
+
+//----------------------- [ Autopay ] --------------------- //
+// Tables for the automatic confirmation of card-to-card payments.
+try {
+    $connect->query("CREATE TABLE IF NOT EXISTS autopay (
+        id INT(6) UNSIGNED PRIMARY KEY,
+        status varchar(10) NULL,
+        device_key varchar(100) NULL,
+        device_info varchar(200) NULL,
+        last_seen varchar(40) NULL,
+        created_at varchar(40) NULL)
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+
+    $connect->query("CREATE TABLE IF NOT EXISTS autopay_order (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        id_user varchar(200) NULL,
+        base_price BIGINT NULL,
+        amount BIGINT NULL,
+        status varchar(20) NULL,
+        id_order varchar(200) NULL,
+        sms_id INT(11) NULL,
+        created_at varchar(40) NULL,
+        closed_at varchar(40) NULL,
+        INDEX autopay_amount_idx (amount),
+        INDEX autopay_status_idx (status))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+
+    $connect->query("CREATE TABLE IF NOT EXISTS autopay_sms (
+        id INT(11) UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+        hash varchar(70) NULL,
+        sender varchar(100) NULL,
+        body TEXT NULL,
+        amount BIGINT NULL,
+        direction varchar(10) NULL,
+        card varchar(10) NULL,
+        sent_at varchar(40) NULL,
+        received_at varchar(40) NULL,
+        status varchar(20) NULL,
+        id_order varchar(200) NULL,
+        UNIQUE KEY autopay_sms_hash (hash))
+        ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE utf8mb4_bin");
+
+    echo "autopay tables ready ✅<br>";
+} catch (Exception $e) {
+    echo "autopay tables: " . $e->getMessage() . "<br>";
+}
