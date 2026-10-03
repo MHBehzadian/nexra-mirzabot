@@ -1,0 +1,70 @@
+name: Release
+
+# Push a tag like v6.0.0 (or publish a release) to build:
+#   nexrabot-linux-amd64 / nexrabot-linux-arm64  — the bot, used by install.sh
+#   nexra-autopay.apk                              — the auto-confirm phone app,
+#                                                    which Nexra Panel can fetch
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+      - run: go vet ./... && go test ./...
+      - name: Build
+        run: |
+          for arch in amd64 arm64; do
+            CGO_ENABLED=0 GOOS=linux GOARCH=$arch go build -trimpath -ldflags "-s -w" -o dist/nexrabot-linux-$arch ./cmd/nexrabot
+          done
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bot
+          path: dist/
+
+  apk:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+      - name: Build APK
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+      - run: mkdir -p dist && cp android/app/build/outputs/apk/debug/app-debug.apk dist/nexra-autopay.apk
+      - uses: actions/upload-artifact@v4
+        with:
+          name: apk
+          path: dist/
+
+  release:
+    needs: [bot, apk]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      - run: |
+          cp install.sh dist/
+          cd dist && sha256sum nexrabot-linux-* nexra-autopay.apk install.sh > SHA256SUMS && cat SHA256SUMS
+      - uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+          generate_release_notes: true

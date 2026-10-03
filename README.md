@@ -1,22 +1,16 @@
 # nexra-mirzabot
 
-A fork of [mahdiMGF2/botmirzapanel](https://github.com/mahdiMGF2/botmirzapanel)
-(GPLv3) with these additions baked in:
+ربات فروش تلگرام Nexra — بازنویسی کامل میرزابات (PHP) به **Go**.
 
-- **Nexra Panel integration** as a new panel type — user creation/edit/delete
-  go through Nexra (so admin traffic quotas are enforced), while reads
-  (status, subscription link, config links) go straight to the real Marzban
-  instance for full fidelity.
-- Adding/removing/editing a panel or its connection details is gated behind
-  a secret code (`NEXRA_SECRET_CODE` in `config.php`).
-- No more "unlimited" volume/time products or trial accounts (Nexra can't
-  represent unlimited, so the bot no longer offers it anywhere).
-- Trial accounts and paid purchases can offer the customer a choice between
-  a custom username or a random one via two buttons, instead of a fixed
-  admin-picked method.
-- Rebranded welcome/admin messages (no upstream branding).
+- یک فایل اجرایی، بدون PHP و php-fpm و crontab؛ کارهای زمان‌بندی‌شده داخل خود ربات اجرا می‌شوند.
+- **همان دیتابیس** نسخه‌ی PHP: ربات‌های فعلی بدون انتقال داده، بدون عوض‌کردن وبهوک و بدون قطعی به Go منتقل می‌شوند و هر وقت بخواهید با یک دستور به PHP برمی‌گردند.
+- همه‌ی قابلیت‌های نسخه‌ی شما: پنل Nexra (ساخت کاربر از طریق Nexra، خواندن مستقیم از مرزبان)، قفل مدیریت پنل با کد مخفی، انتخاب نام کاربری دلخواه/تصادفی، و **تأیید خودکار پرداخت** با اپ اندروید (همان کلید اتصال قبلی کار می‌کند).
+- دکمه‌های منوی اصلی قابل تنظیم: جا، رنگ و آیکون ایموجی پریمیوم.
+- API مدیریت برای **Nexra Panel** (بخش «Bot»): ادمین هر ربات محصولات، پرداخت‌ها، کاربران، متن‌ها و دکمه‌ها را از پنل مدیریت می‌کند؛ سرورها (پنل‌های VPN) فقط دست مالک است.
 
-## Install (one line)
+کد PHP قبلی در `legacy-php/` نگه داشته شده (مرجع و مسیر بازگشت).
+
+## نصب ربات جدید
 
 ```bash
 N=7 TOKEN='123456:abc-token' DOMAIN='bot7.example.com' ADMIN='123456789' \
@@ -24,10 +18,76 @@ NEXRA_SECRET='your-secret-code' CERT_EMAIL='you@example.com' \
 bash <(curl -sL https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/main/install.sh)
 ```
 
-Requires: DNS for `DOMAIN` already pointing at this server, nginx +
-php8.1-fpm + mysql + certbot already installed, and `botmirzapanel4`-style
-prior setup only if you're overlaying onto an older install — a fresh
-install via this script needs none of that, it's self-contained.
+پیش‌نیاز: رکورد DNS دامنه به همین سرور، و nginx + MySQL/MariaDB + certbot نصب باشند (PHP لازم نیست).
+`N` شماره‌ی ربات روی این سرور است؛ ربات روی پورت `18000+N` اجرا می‌شود و nginx جلویش است.
+آخر کار، آدرس و دو کلید API برای اتصال در Nexra Panel چاپ می‌شود.
 
-`N` must be a bot number not already used on this server
-(`/var/www/html/botmirzapanel<N>` must not exist yet).
+## انتقال ربات‌های PHP فعلی به Go
+
+```bash
+curl -sLo install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/main/install.sh
+N=7 bash install.sh migrate        # برای ربات /var/www/html/botmirzapanel7
+```
+
+اسکریپت قبل از هر تغییری از دیتابیس بکاپ می‌گیرد، ربات Go را آزمایشی بالا می‌آورد، و فقط اگر همه‌چیز سالم بود nginx را از php-fpm به Go
+می‌برد. اگر هر مرحله‌ای خطا بدهد، خودش همه‌چیز را به حالت PHP برمی‌گرداند. جزئیات و نکته‌ها: [docs/MIGRATION.md](docs/MIGRATION.md).
+
+بازگشت به PHP در هر زمان:
+
+```bash
+N=7 bash install.sh rollback
+```
+
+به‌روزرسانی همه‌ی ربات‌های Go روی سرور به آخرین نسخه:
+
+```bash
+bash install.sh update
+```
+
+## اتصال به Nexra Panel
+
+```bash
+N=7 bash install.sh keys
+```
+
+در Nexra Panel (با حساب مالک) → **Bot** → «افزودن ربات»: آدرس `https://bot7.example.com` و دو کلید را وارد کنید و ربات را به ادمینش بدهید.
+آن ادمین از منوی Bot همه‌ی کارهای ربات را انجام می‌دهد، جز افزودن/ویرایش/حذف سرورها که فقط برای مالک است.
+
+## تفاوت‌ها با نسخه‌ی PHP
+
+رفتار ربات برای کاربر و ادمین همان است؛ این را یک آزمون تفاضلی نشان می‌دهد که نسخه‌ی PHP و Go را کنار هم اجرا می‌کند، ۲۹۳ پیام یکسان به
+هر دو می‌فرستد و تک‌تک درخواست‌های تلگرام و ردیف‌های دیتابیس را مقایسه می‌کند (`tests/diff`). چند باگ نسخه‌ی PHP عمداً درست شده‌اند؛ فهرست
+کامل: [docs/CHANGES.md](docs/CHANGES.md).
+
+## دستورات
+
+```
+nexrabot serve        -c /etc/nexrabot/bot7.env    اجرای ربات (systemd: nexrabot@7)
+nexrabot migrate-php  --php-dir … --out …          ساخت تنظیمات از config.php نسخه‌ی PHP
+nexrabot import-sql   -c … --file backup.sql.gz    بارگذاری بکاپ mysqldump در دیتابیس
+nexrabot db-dump      -c … --out bot7.sql.gz       بکاپ دیتابیس
+nexrabot schema       -c …                         ساخت/به‌روزرسانی جدول‌ها (تکرارپذیر)
+nexrabot check        -c …                         آزمایش دیتابیس و توکن
+nexrabot set-webhook  -c …                         تنظیم وبهوک (با توکن مخفی)
+nexrabot keys         -c …                         کلیدهای API برای Nexra Panel
+nexrabot autopay-test -c … parse|status|send …     آزمایش تشخیص پیامک بانک
+```
+
+لاگ: `journalctl -u nexrabot@7 -f`
+
+## ساخت از سورس و آزمون‌ها
+
+```bash
+go build -o nexrabot ./cmd/nexrabot
+go test ./...
+cd tests/diff && python3 run.py        # آزمون تفاضلی PHP/Go (نیاز به MariaDB و php)
+python3 api_smoke.py                   # API مدیریت
+python3 panel_e2e.py                   # بخش Bot در Nexra Panel
+```
+
+با هر تگ `v*` (مثلاً `v6.0.0`)، GitHub Actions فایل‌های اجرایی لینوکس (amd64/arm64) و اپ اندروید تأیید خودکار را می‌سازد و در Release
+می‌گذارد؛ `install.sh` و دکمه‌ی «گرفتن آخرین نسخه از GitHub» در Nexra Panel از همان‌جا برمی‌دارند.
+
+## License
+
+GPLv3, like the upstream [mahdiMGF2/botmirzapanel](https://github.com/mahdiMGF2/botmirzapanel).
