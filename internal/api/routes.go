@@ -131,6 +131,9 @@ var cronNames = []string{"test", "volume", "time", "remove", "card"}
 
 func (a *API) getSettings(w http.ResponseWriter, r *http.Request) {
 	d := a.B.DB
+	// old installs keep some switches as text; convert them like the bot's
+	// status page does so they read correctly here
+	a.B.MigrateLegacySettings()
 	s := d.Setting()
 	out := map[string]any{}
 	for _, k := range settingFlags {
@@ -293,8 +296,17 @@ func (a *API) putButtons(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
+	if err := bot.ValidateButtons(in); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	// a field left out keeps what is stored
+	cur := bot.LoadButtons(a.B.DB)
 	if in.Layout == nil {
-		in.Layout = bot.LoadButtons(a.B.DB).Layout
+		in.Layout = cur.Layout
+	}
+	if in.Buttons == nil {
+		in.Buttons = cur.Buttons
 	}
 	bot.StoreButtons(a.B.DB, in)
 	a.getButtons(w, r)

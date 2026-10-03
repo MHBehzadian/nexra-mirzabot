@@ -596,8 +596,8 @@ func (b *Bot) ToggleSetting(typ, value string) {
 	}
 }
 
-// migrateLegacySettings turns the old text-valued switches into 1/0.
-func (b *Bot) migrateLegacySettings() {
+// MigrateLegacySettings turns the old text-valued switches into 1/0.
+func (b *Bot) MigrateLegacySettings() {
 	d := b.DB
 	s := d.Setting()
 	pairs := []struct{ col, on, off string }{
@@ -683,7 +683,7 @@ func (c *Ctx) admTail() bool {
 	case c.stepIs("setinboundandprotocol"):
 		return c.setInbounds()
 	case c.text == T("Admin.keyboardadmin.seetingstatus"):
-		c.b.migrateLegacySettings()
+		c.b.MigrateLegacySettings()
 		c.sendHTML(c.fromID, T("Admin.Status.BotTitle"), c.settingsKeyboard())
 	case c.m(`^editstsuts-(.*)-(.*)`):
 		c.b.ToggleSetting(c.g(1), c.g(2))

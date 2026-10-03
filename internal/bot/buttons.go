@@ -2,6 +2,7 @@ package bot
 
 import (
 	"encoding/json"
+	"fmt"
 	"strings"
 
 	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
@@ -157,4 +158,41 @@ func (bc ButtonConfig) styled(key string, b tg.Button) tg.Button {
 		b.IconCustomEmojiID = s.Emoji
 	}
 	return b
+}
+
+// ValidateButtons reports the first thing in a submitted customisation that
+// SanitizeButtons would silently drop, so an API caller gets a clear error.
+func ValidateButtons(in ButtonConfig) error {
+	allowed := map[string]bool{}
+	for _, k := range append(append([]string{}, MainButtonKeys...), ExtraStyleKeys...) {
+		allowed[k] = true
+	}
+	main := map[string]bool{}
+	for _, k := range MainButtonKeys {
+		main[k] = true
+	}
+	for _, row := range in.Layout {
+		if len(row) > 4 {
+			return fmt.Errorf("a row can hold at most 4 buttons")
+		}
+		for _, k := range row {
+			if !main[k] {
+				return fmt.Errorf("unknown main-menu button %q", k)
+			}
+		}
+	}
+	for k, s := range in.Buttons {
+		if !allowed[k] {
+			return fmt.Errorf("unknown button %q", k)
+		}
+		switch s.Style {
+		case "", "primary", "success", "danger":
+		default:
+			return fmt.Errorf("button %q: style must be primary, success, danger or empty", k)
+		}
+		if e := strings.TrimSpace(s.Emoji); e != "" && !isDigits(e) {
+			return fmt.Errorf("button %q: emoji must be a custom emoji id (digits)", k)
+		}
+	}
+	return nil
 }
