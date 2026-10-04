@@ -69,6 +69,15 @@ func LoadButtons(d *db.DB) ButtonConfig {
 	if !validLayout(cfg.Layout) {
 		cfg.Layout = DefaultLayout()
 	}
+	// icons outside the panel's allowed packs are not shown
+	if set, restricted := EmojiAllowList(d); restricted {
+		for k, s := range cfg.Buttons {
+			if s.Emoji != "" && !set[s.Emoji] {
+				s.Emoji = ""
+				cfg.Buttons[k] = s
+			}
+		}
+	}
 	return cfg
 }
 

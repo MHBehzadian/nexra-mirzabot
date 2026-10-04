@@ -215,6 +215,40 @@ def run():
     c, payload, ctype = req("GET", "/sales-bots/autopay-app/download", None, raw=True)
     check("download needs login", c == 401, c)
 
+    # premium emoji packs: the superadmin's list is what the bots allow
+    packs_file = os.path.join(PANEL, "data", "emoji-packs.json")
+    if os.path.exists(packs_file):
+        os.remove(packs_file)
+    p = expect("no packs yet", "GET", "/sales-bots/emoji-packs", 200, ad)
+    check("not configured", p and p["configured"] is False and p["packs"] == [], p)
+    expect("admin cannot add packs", "POST", "/sales-bots/emoji-packs", 403, ad, {"link": "https://t.me/addemoji/NexraPack"})
+    expect("unknown pack", "POST", "/sales-bots/emoji-packs", 404, su, {"link": "https://t.me/addemoji/Missing"})
+    r = expect("add pack by link", "POST", "/sales-bots/emoji-packs", 200, su, {"link": "https://t.me/addemoji/NexraPack"})
+    check("pack stored and pushed", r and len(r["packs"][0]["emojis"]) == 2 and r["pushed"] and r["pushed"][0]["ok"], r)
+    expect("same pack twice", "POST", "/sales-bots/emoji-packs", 409, su, {"link": "NexraPack"})
+    al = expect("bot got the allow-list", "GET", "/sales-bots/%d/api/emoji-allow" % bid, 200, ad)
+    check("bot restricted to the pack", al and al["restricted"] and sorted(al["ids"]) == ["5368324170671202286", "5368324170671202287"], al)
+    expect("admin cannot change the allow-list", "PUT", "/sales-bots/%d/api/emoji-allow" % bid, 403, ad, {"restricted": False})
+    expect("admin browses an allowed pack", "GET", "/sales-bots/%d/api/emoji-pack/NexraPack" % bid, 200, ad)
+    expect("admin cannot browse other packs", "GET", "/sales-bots/%d/api/emoji-pack/OtherPack" % bid, 403, ad)
+    expect("icon outside the packs refused", "PUT", "/sales-bots/%d/api/buttons" % bid, 400, ad, {"buttons": {"text_sell": {"emoji": "5368324170671202299"}}})
+    expect("icon from the pack accepted", "PUT", "/sales-bots/%d/api/buttons" % bid, 200, ad, {"buttons": {"text_sell": {"emoji": "5368324170671202286"}}})
+    r = expect("remove pack", "DELETE", "/sales-bots/emoji-packs/NexraPack", 200, su)
+    al = expect("allow-list after removal", "GET", "/sales-bots/%d/api/emoji-allow" % bid, 200, su)
+    check("nothing allowed now", al and al["restricted"] and al["ids"] == [], al)
+    os.remove(packs_file)
+    expect("lift restriction (owner)", "PUT", "/sales-bots/%d/api/emoji-allow" % bid, 403, su, {"restricted": False})
+    import urllib.request as ur
+    ur.urlopen(ur.Request("http://127.0.0.1:9102/api/v1/emoji-allow", data=b'{"restricted": false}', method="PUT",
+                          headers={"Authorization": "Bearer owner", "Content-Type": "application/json"}))
+
+    # auto-confirm mode through the panel
+    m = expect("autopay no_review", "PUT", "/sales-bots/%d/api/autopay" % bid, 200, ad, {"mode": "no_review"})
+    check("mode saved", m and m["mode"] == "no_review" and not m["enabled"], m)
+    m = expect("autopay sms", "PUT", "/sales-bots/%d/api/autopay" % bid, 200, ad, {"mode": "sms"})
+    check("sms mode excludes the unchecked one", m and m["mode"] == "sms" and m["enabled"], m)
+    expect("autopay off", "PUT", "/sales-bots/%d/api/autopay" % bid, 200, ad, {"mode": "off"})
+
     # deleting the admin leaves the bot, unassigned
     expect("disconnect bot", "DELETE", "/sales-bots/manage/%d" % bid, 200, su)
     expect("gone", "GET", "/sales-bots/%d/api/info" % bid, 404, su)

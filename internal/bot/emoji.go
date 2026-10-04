@@ -80,8 +80,9 @@ var buttonTextKeys = map[string]bool{
 // leading premium emoji as the button icon; message texts keep them inline.
 func (c *Ctx) saveBotText(id string) {
 	value := c.text
+	ents := allowedEntities(c.db(), c.f.Entities)
 	if buttonTextKeys[id] {
-		if emoji, rest := leadingCustomEmoji(c.text, c.f.Entities); emoji != "" {
+		if emoji, rest := leadingCustomEmoji(c.text, ents); emoji != "" {
 			value = rest
 			bc := LoadButtons(c.db())
 			s := bc.Buttons[id]
@@ -90,7 +91,7 @@ func (c *Ctx) saveBotText(id string) {
 			StoreButtons(c.db(), bc)
 		}
 	} else {
-		value = withCustomEmoji(c.text, c.f.Entities)
+		value = withCustomEmoji(c.text, ents)
 	}
 	c.upd("textbot", "text", value, "id_text", id)
 }

@@ -2,6 +2,7 @@ package bot
 
 import (
 	"encoding/json"
+	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
 	"math"
 	"time"
 
@@ -49,7 +50,9 @@ func (b *Bot) RunCrons(stop <-chan struct{}) {
 			b.cronConfigTest()
 		}
 	})
-	every(4*time.Minute, "croncard", func() {
+	// "auto-confirm without review": every receipt about a minute after it
+	// arrives (the PHP crontab ran this every 4 minutes)
+	every(20*time.Second, "croncard", func() {
 		if b.CronOn("card") {
 			b.cronCard()
 		}
@@ -161,14 +164,22 @@ func (b *Bot) cronRemoveExpire() {
 	}
 }
 
-// cronCard is "automatic confirmation": every card-to-card receipt that is
-// still waiting after being sent within the last hour is accepted.
+// cronCard is "automatic confirmation without review": a card-to-card
+// receipt still waiting a minute after it was sent (and at most an hour) is
+// accepted, and the bot's admins are told to look at it themselves. When the
+// SMS check (autopay) is on it decides instead, so this stands aside.
+const cardAutoDelay = 60 // seconds after the receipt
+
 func (b *Bot) cronCard() {
 	d := b.DB
+	if b.AutopaySettings().S("status") == "on" {
+		return
+	}
 	setting := d.Setting()
 	for _, r := range d.MustQuery("SELECT * FROM Payment_report WHERE payment_Status = 'waiting' AND Payment_Method = 'cart to cart'") {
 		ts, ok := php.Strtotime(r.S("time"))
-		if !ok || time.Now().Unix()-ts >= 3600 {
+		age := time.Now().Unix() - ts
+		if !ok || age >= 3600 || age < cardAutoDelay {
 			continue
 		}
 		b.lockOrder(r.S("id_order"), func() {
@@ -184,7 +195,29 @@ func (b *Bot) cronCard() {
 			if ch := setting.S("Channel_Report"); ch != "" {
 				b.TG.SendMessage(ch, sprintf("Admin.Report.autocart", buyer.S("id"), rep.S("price")), nil, "HTML")
 			}
+			b.notifyAutoCard(rep, buyer)
 		})
+	}
+}
+
+// notifyAutoCard tells every admin that a receipt went through unchecked,
+// with the receipt photo when the bot kept it.
+func (b *Bot) notifyAutoCard(rep, buyer db.Row) {
+	uname := buyer.S("username")
+	if uname == "" || uname == "NOT_USERNAME" || uname == "none" {
+		uname = "—"
+	} else {
+		uname = "@" + uname
+	}
+	text := sprintf("Admin.Report.autocartadmin", nfs(rep.S("price")), rep.S("id_user"), uname, rep.S("id_order"), rep.S("time"))
+	photo := b.DB.KV("receipt_" + rep.S("id_order"))
+	for _, a := range b.DB.AdminIDs() {
+		if photo != "" {
+			if r := b.TG.SendPhotoID(a, photo, text, nil, "HTML"); r.OK {
+				continue
+			}
+		}
+		b.TG.SendMessage(a, text, nil, "HTML")
 	}
 }
 

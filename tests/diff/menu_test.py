@@ -91,6 +91,10 @@ def main():
 
 
 def run():
+    # start from the stock menu (earlier runs may have changed it)
+    http("PUT", BOT + "/api/v1/emoji-allow", {"restricted": False}, {"Authorization": "Bearer owner"})
+    api("PUT", "/buttons", {"mode": "reply", "buttons": {}, "layout": [["text_sell", "text_usertest"], ["text_Purchased_services", "text_Tariff_list"],
+                                                                        ["text_account", "text_Add_Balance"], ["affiliates"], ["text_support", "text_help"]]})
     code, b = api("GET", "/buttons")
     check("mode defaults to reply", b["data"]["mode"] == "reply", b["data"].get("mode"))
     labels = b["data"]["labels"]
@@ -149,6 +153,29 @@ def run():
     code, b = api("GET", "/emoji-pack/" + urllib.request.quote("https:", safe="") + "nope")
     code, b = api("GET", "/emoji-pack/missing")
     check("missing pack 404", code == 404, b)
+
+    # allow-list pushed by the panel owner
+    ok_id, other = "5368324170671202286", "5368324170671202299"
+    code, b = api("PUT", "/emoji-allow", {"ids": [ok_id]})
+    check("manager cannot set the allow-list", code == 403, (code, b))
+    code, b = http("PUT", BOT + "/api/v1/emoji-allow", {"ids": [ok_id, "x"]}, {"Authorization": "Bearer owner"})
+    check("owner sets the allow-list", code == 200 and b["data"]["restricted"] and b["data"]["ids"] == [ok_id], b)
+    code, b = api("PUT", "/buttons", {"buttons": {"text_sell": {"emoji": other}}})
+    check("emoji outside the packs refused", code == 400, b)
+    code, b = api("PUT", "/buttons", {"buttons": {"text_sell": {"emoji": ok_id}, "text_help": {"style": "danger"}}})
+    check("allowed emoji accepted", code == 200 and b["data"]["buttons"]["text_sell"]["emoji"] == ok_id, b)
+    code, b = api("PUT", "/texts", {"text_start": 'hi <tg-emoji emoji-id="%s">😀</tg-emoji>' % other})
+    check("text with outside emoji refused", code == 400, b)
+    code, b = api("PUT", "/texts", {"text_start": 'hi <tg-emoji emoji-id="%s">😀</tg-emoji>' % ok_id})
+    check("text with allowed emoji accepted", code == 200, b)
+    http("PUT", BOT + "/api/v1/emoji-allow", {"ids": [other]}, {"Authorization": "Bearer owner"})
+    code, b = api("GET", "/buttons")
+    check("icon no longer allowed is not used", "emoji" not in b["data"]["buttons"].get("text_sell", {}), b["data"]["buttons"])
+    log = update("/start")
+    flat = [x for r in calls(log, "sendmessage")[-1]["reply_markup"].get("keyboard", []) for x in r]
+    check("menu without the removed icon", not any(x.get("icon_custom_emoji_id") for x in flat), flat)
+    code, b = http("PUT", BOT + "/api/v1/emoji-allow", {"restricted": False}, {"Authorization": "Bearer owner"})
+    check("allow-list lifted", code == 200 and not b["data"]["restricted"], b)
 
 
 if __name__ == "__main__":

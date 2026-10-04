@@ -24,6 +24,8 @@ func (a *API) routes() {
 	a.handle("PUT /api/v1/buttons", roleManager, a.putButtons)
 	a.handle("GET /api/v1/emoji/{id}", roleManager, a.emojiPreview)
 	a.handle("GET /api/v1/emoji-pack/{name}", roleManager, a.emojiPack)
+	a.handle("GET /api/v1/emoji-allow", roleManager, a.getEmojiAllow)
+	a.handle("PUT /api/v1/emoji-allow", roleOwner, a.putEmojiAllow)
 
 	// catalogue
 	a.handle("GET /api/v1/products", roleManager, a.listProducts)
@@ -264,6 +266,10 @@ func (a *API) putTexts(w http.ResponseWriter, r *http.Request) {
 			fail(w, 400, id+" cannot be empty")
 			return
 		}
+		if bad := bot.DisallowedEmojiInText(a.B.DB, txt); bad != "" {
+			fail(w, 400, id+": premium emoji "+bad+" is not in the allowed packs")
+			return
+		}
 	}
 	for id, txt := range in {
 		a.B.DB.Exec("INSERT INTO textbot (id_text, text) VALUES (?, ?) ON DUPLICATE KEY UPDATE text = VALUES(text)", id, txt)
@@ -302,6 +308,12 @@ func (a *API) putButtons(w http.ResponseWriter, r *http.Request) {
 	if err := bot.ValidateButtons(in); err != nil {
 		fail(w, 400, err.Error())
 		return
+	}
+	for k, s := range in.Buttons {
+		if s.Emoji != "" && !bot.EmojiAllowed(a.B.DB, s.Emoji) {
+			fail(w, 400, "button "+k+": this premium emoji is not in the allowed packs")
+			return
+		}
 	}
 	// a field left out keeps what is stored
 	cur := bot.LoadButtons(a.B.DB)

@@ -147,7 +147,15 @@ func (a *API) getAutopay(w http.ResponseWriter, r *http.Request) {
 	b := a.B
 	d := b.DB
 	s := b.AutopaySettings()
+	mode := "off"
+	switch {
+	case s.S("status") == "on":
+		mode = "sms"
+	case b.CronOn("card"):
+		mode = "no_review"
+	}
 	ok(w, map[string]any{
+		"mode":        mode,
 		"enabled":     s.S("status") == "on",
 		"last_seen":   s.S("last_seen"),
 		"device":      s.S("device_info"),
@@ -167,7 +175,25 @@ func (a *API) putAutopay(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, err.Error())
 		return
 	}
-	if f.has("enabled") {
+	// mode picks one of the two kinds of automatic confirmation (they would
+	// fight over the same receipts): "off", "no_review" (every receipt a
+	// minute later, unchecked) or "sms" (the phone app matches bank SMS)
+	if f.has("mode") {
+		switch f.str("mode") {
+		case "off":
+			a.B.AutopaySet("status", "off")
+			a.B.SetCron("card", false)
+		case "no_review":
+			a.B.AutopaySet("status", "off")
+			a.B.SetCron("card", true)
+		case "sms":
+			a.B.SetCron("card", false)
+			a.B.AutopaySet("status", "on")
+		default:
+			fail(w, 400, "mode must be off, no_review or sms")
+			return
+		}
+	} else if f.has("enabled") {
 		if f.boolean("enabled") {
 			a.B.AutopaySet("status", "on")
 		} else {

@@ -2,6 +2,8 @@ package api
 
 import (
 	"net/http"
+
+	"github.com/MHBehzadian/nexra-mirzabot/internal/bot"
 	"regexp"
 	"strings"
 	"sync"
@@ -91,4 +93,32 @@ func (a *API) emojiPack(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 	ok(w, map[string]any{"name": set.Name, "title": set.Title, "emojis": out})
+}
+
+func (a *API) getEmojiAllow(w http.ResponseWriter, r *http.Request) {
+	set, restricted := bot.EmojiAllowList(a.B.DB)
+	ids := make([]string, 0, len(set))
+	for id := range set {
+		ids = append(ids, id)
+	}
+	ok(w, map[string]any{"restricted": restricted, "count": len(ids), "ids": ids})
+}
+
+// putEmojiAllow is called by Nexra Panel when its owner changes the packs.
+func (a *API) putEmojiAllow(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Restricted *bool    `json:"restricted"`
+		IDs        []string `json:"ids"`
+	}
+	if err := decode(r, &in); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	restricted := in.Restricted == nil || *in.Restricted
+	if len(in.IDs) > 20000 {
+		fail(w, 400, "too many emoji")
+		return
+	}
+	bot.SetEmojiAllowList(a.B.DB, in.IDs, restricted)
+	a.getEmojiAllow(w, r)
 }
