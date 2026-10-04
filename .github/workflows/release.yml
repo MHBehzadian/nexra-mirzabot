@@ -11,6 +11,10 @@ name: Release
 on:
   push:
     tags: ['v*']
+  # a release created on github.com (Releases → Draft a new release, new tag,
+  # target branch) gets the files attached too
+  release:
+    types: [published]
   workflow_dispatch:
     inputs:
       tag:
@@ -65,7 +69,7 @@ jobs:
     runs-on: ubuntu-latest
     # the bot binaries must not wait on the phone app: publish them even if
     # the APK build failed
-    if: always() && needs.bot.result == 'success' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
+    if: always() && needs.bot.result == 'success' && (github.event_name == 'release' || startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -80,6 +84,6 @@ jobs:
           files: dist/*
           generate_release_notes: true
           # made from the branch it ran on; a tag with "-" (v6.0.0-beta.1) is a pre-release
-          tag_name: ${{ inputs.tag || github.ref_name }}
+          tag_name: ${{ inputs.tag || github.event.release.tag_name || github.ref_name }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}
+          prerelease: ${{ github.event_name == 'release' && github.event.release.prerelease || contains(inputs.tag || github.ref_name, '-') }}
