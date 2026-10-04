@@ -7,7 +7,7 @@
 ## همه‌چیز با یک دستور
 
 ```bash
-curl -sLo /root/nexrabot-install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/claude/festive-keller-mmew1s/install.sh
+curl -sLo /root/nexrabot-install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/main/install.sh
 bash /root/nexrabot-install.sh all
 ```
 

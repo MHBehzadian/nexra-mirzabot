@@ -44,7 +44,7 @@ set -Eeuo pipefail
 
 REPO="${REPO:-MHBehzadian/nexra-mirzabot}"
 RELEASE="${RELEASE:-latest}"
-RAW_URL="https://raw.githubusercontent.com/$REPO/claude/festive-keller-mmew1s/install.sh"
+RAW_URL="https://raw.githubusercontent.com/$REPO/main/install.sh"
 BIN=/usr/local/bin/nexrabot
 ETC=/etc/nexrabot
 BACKUPS=/root/nexrabot-backups
@@ -166,7 +166,7 @@ print_keys() { # N
 # ----------------------------------------------------------------- Nexra Panel
 
 PANEL_REPO="${PANEL_REPO:-https://github.com/MHBehzadian/nexra-panel}"
-PANEL_BRANCH="${PANEL_BRANCH:-claude/festive-keller-mmew1s}"
+PANEL_BRANCH="${PANEL_BRANCH:-main}"
 PANEL_SRC="${PANEL_SRC:-/opt/nexra-panel-src}"
 
 # find_panel: the Nexra Panel container on this server, if there is one
@@ -243,7 +243,8 @@ cmd_panel_update() {
     # later "docker compose up --build" there doesn't bring the old one back
     if [ -d "$PANEL_DIR/.git" ]; then
         git -C "$PANEL_DIR" fetch -q origin "$PANEL_BRANCH" 2>/dev/null &&
-            git -C "$PANEL_DIR" checkout -q "$PANEL_BRANCH" 2>/dev/null ||
+            git -C "$PANEL_DIR" checkout -q "$PANEL_BRANCH" 2>/dev/null &&
+            git -C "$PANEL_DIR" merge -q --ff-only FETCH_HEAD 2>/dev/null ||
             warn "$PANEL_DIR has local changes; left it on its current version"
     fi
     say "restarting the panel"
