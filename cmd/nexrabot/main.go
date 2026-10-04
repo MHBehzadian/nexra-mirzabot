@@ -15,6 +15,7 @@ import (
 	"bytes"
 	"compress/gzip"
 	"context"
+	"crypto/tls"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -465,6 +466,12 @@ func cmdPanelRegister(args []string) {
 	}
 	base := strings.TrimRight(*panelURL, "/")
 	hc := &http.Client{Timeout: 60 * time.Second}
+	// a panel on this same server with its own (domain) certificate is
+	// reached by 127.0.0.1, where that certificate can't match
+	if u, err := url.Parse(base); err == nil && os.Getenv("NEXRA_PANEL_INSECURE") == "1" &&
+		(u.Hostname() == "127.0.0.1" || u.Hostname() == "localhost") {
+		hc.Transport = &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}
+	}
 
 	form := url.Values{"username": {*user}, "password": {pass}}
 	res, err := hc.PostForm(base+"/login", form)

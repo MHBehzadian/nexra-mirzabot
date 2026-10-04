@@ -18,22 +18,33 @@
 #   Show the keys Nexra Panel needs:
 #     N=7 bash install.sh keys
 #
+#   Everything on one server, nothing to type: update the Nexra Panel that
+#   runs here (found by itself, credentials read from it), then move every
+#   PHP bot to Go and connect each to the panel under its owner:
+#     bash /root/nexrabot-install.sh all
+#
 #   Move EVERY PHP bot on this server (/var/www/html/botmirzapanel*) to Go,
 #   one by one, and connect each to Nexra Panel under its owner:
 #     curl -sLo /root/nexrabot-install.sh <raw url of this file>
 #     NEXRA_PANEL_URL=https://panel.example.com/dashboard NEXRA_PANEL_USER=admin \
 #     NEXRA_PANEL_PASS='...' bash /root/nexrabot-install.sh migrate-all
 #   A bot that fails is put back on PHP by itself and the others carry on.
-#   Without the NEXRA_PANEL_* variables the bots are migrated but not
-#   connected; connect them later with:  N=7 bash install.sh register
+#   Without the NEXRA_PANEL_* variables the Nexra Panel on this server is
+#   used; with none, the bots are migrated but not connected (on the panel's
+#   server, "bash install.sh panel-link" prints the command for this one).
+#
+#   Update only the Nexra Panel running here (data backed up first, the old
+#   version comes back by itself if the new one doesn't start):
+#     bash install.sh panel-update
 #
 # Optional: NEXRABOT_BIN=/path/to/nexrabot uses a local binary instead of
-# downloading the latest release; RELEASE=v6.0.0 pins a release.
+# downloading the latest release; RELEASE=v6.0.1 pins a release.
 # =============================================================================
 set -Eeuo pipefail
 
 REPO="${REPO:-MHBehzadian/nexra-mirzabot}"
 RELEASE="${RELEASE:-latest}"
+RAW_URL="https://raw.githubusercontent.com/$REPO/claude/festive-keller-mmew1s/install.sh"
 BIN=/usr/local/bin/nexrabot
 ETC=/etc/nexrabot
 BACKUPS=/root/nexrabot-backups
@@ -154,8 +165,149 @@ print_keys() { # N
 
 # ----------------------------------------------------------------- Nexra Panel
 
-register_with_panel() { # N — needs NEXRA_PANEL_URL, NEXRA_PANEL_USER, NEXRA_PANEL_PASS
+PANEL_REPO="${PANEL_REPO:-https://github.com/MHBehzadian/nexra-panel}"
+PANEL_BRANCH="${PANEL_BRANCH:-claude/festive-keller-mmew1s}"
+PANEL_SRC="${PANEL_SRC:-/opt/nexra-panel-src}"
+
+# find_panel: the Nexra Panel container on this server, if there is one
+find_panel() {
+    command -v docker >/dev/null 2>&1 || return 1
+    PANEL_C=$(docker ps --format '{{.Names}} {{.Image}}' 2>/dev/null |
+        awk '$1 ~ /^(nexra-panel|whale-panel|walpanel)$/ || $2 ~ /(nexra-panel|whale-panel)/ {print $1; exit}')
+    [ -n "$PANEL_C" ] || return 1
+    local label='{{ index .Config.Labels "%s" }}'
+    PANEL_DIR=$(docker inspect -f "$(printf "$label" com.docker.compose.project.working_dir)" "$PANEL_C")
+    PANEL_FILES=$(docker inspect -f "$(printf "$label" com.docker.compose.project.config_files)" "$PANEL_C")
+    PANEL_SERVICE=$(docker inspect -f "$(printf "$label" com.docker.compose.service)" "$PANEL_C")
+    PANEL_IMAGE=$(docker inspect -f '{{.Config.Image}}' "$PANEL_C")
+    PANEL_DATA=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/app/data"}}{{.Source}}{{end}}{{end}}' "$PANEL_C")
+}
+
+panel_var() { # NAME [default] — from the panel container's environment (its .env)
+    local v
+    v=$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PANEL_C" | sed -n "s/^$1=//p" | head -1)
+    v="${v%\"}"; v="${v#\"}"; v="${v%\'}"; v="${v#\'}"
+    echo "${v:-${2:-}}"
+}
+
+# panel_env: fill NEXRA_PANEL_* from the local panel unless they were given
+panel_env() {
+    [ -n "${NEXRA_PANEL_URL:-}" ] && return 0
+    find_panel || return 0
+    local scheme=http
+    [ -n "$(panel_var SSL_CERTFILE)" ] && { scheme=https; export NEXRA_PANEL_INSECURE=1; }
+    export NEXRA_PANEL_URL="$scheme://127.0.0.1:$(panel_var PORT 8000)/$(panel_var URLPATH dashboard)"
+    export NEXRA_PANEL_USER="$(panel_var ADMIN_USERNAME)"
+    export NEXRA_PANEL_PASS="$(panel_var ADMIN_PASSWORD)"
+    say "using the Nexra Panel on this server ($PANEL_C, $NEXRA_PANEL_URL)"
+}
+
+panel_up() { # wait for the panel's login page
+    local i
+    for i in $(seq 1 "${PANEL_WAIT:-90}"); do
+        curl -fsk -o /dev/null -m 3 "$1/login" && return 0
+        sleep 2
+    done
+    return 1
+}
+
+cmd_panel_update() {
+    if ! find_panel; then
+        warn "no Nexra Panel container runs on this server; update it on its own server with: bash install.sh panel-update"
+        return 0
+    fi
+    [ -n "$PANEL_DIR" ] && [ -n "$PANEL_SERVICE" ] || die "$PANEL_C was not started with docker compose; update it by hand"
+    local ts old url
+    ts=$(date +%Y%m%d_%H%M%S)
+    old="nexra-panel-previous:$ts" # kept so a failed update can go back
+    mkdir -p "$BACKUPS"; chmod 700 "$BACKUPS"
+    if [ -n "$PANEL_DATA" ] && [ -d "$PANEL_DATA" ]; then
+        tar -czf "$BACKUPS/panel-data-$ts.tar.gz" -C "$PANEL_DATA" .
+        say "panel data backed up to $BACKUPS/panel-data-$ts.tar.gz"
+    fi
+    say "getting Nexra Panel ($PANEL_BRANCH)"
+    if [ -d "$PANEL_SRC/.git" ]; then
+        git -C "$PANEL_SRC" fetch -q --depth 1 origin "$PANEL_BRANCH" && git -C "$PANEL_SRC" checkout -q -f FETCH_HEAD
+    else
+        rm -rf "$PANEL_SRC"
+        git clone -q --depth 1 -b "$PANEL_BRANCH" "$PANEL_REPO" "$PANEL_SRC"
+    fi
+    say "building the panel image $PANEL_IMAGE (a few minutes)"
+    docker tag "$(docker inspect -f '{{.Image}}' "$PANEL_C")" "$old" 2>/dev/null ||
+        docker tag "$PANEL_IMAGE" "$old"
+    if ! docker build -q -t "$PANEL_IMAGE" "$PANEL_SRC" >/dev/null; then
+        docker rmi "$old" >/dev/null 2>&1 || true
+        die "building the new panel failed; the panel was not touched"
+    fi
+    # keep a clone of the panel in its own folder on the same version, so a
+    # later "docker compose up --build" there doesn't bring the old one back
+    if [ -d "$PANEL_DIR/.git" ]; then
+        git -C "$PANEL_DIR" fetch -q origin "$PANEL_BRANCH" 2>/dev/null &&
+            git -C "$PANEL_DIR" checkout -q "$PANEL_BRANCH" 2>/dev/null ||
+            warn "$PANEL_DIR has local changes; left it on its current version"
+    fi
+    say "restarting the panel"
+    local files=() f
+    IFS=, read -ra f <<< "$PANEL_FILES"
+    for x in "${f[@]}"; do files+=(-f "$x"); done
+    (cd "$PANEL_DIR" && docker compose "${files[@]}" up -d --no-build --force-recreate "$PANEL_SERVICE")
+    find_panel || true # still the same container name if it already stopped
+    url="http://127.0.0.1:$(panel_var PORT 8000)/$(panel_var URLPATH dashboard)"
+    [ -n "$(panel_var SSL_CERTFILE)" ] && url="https${url#http}"
+    if ! panel_up "$url"; then
+        warn "the new panel did not come up — going back to the previous one"
+        docker tag "$old" "$PANEL_IMAGE"
+        (cd "$PANEL_DIR" && docker compose "${files[@]}" up -d --no-build --force-recreate "$PANEL_SERVICE")
+        die "panel update failed; the old panel runs again (logs: docker logs $PANEL_C)"
+    fi
+    say "Nexra Panel updated (previous image kept as $old)"
+}
+
+php_bots() { # numbers of the PHP bots on this server
+    local dir n
+    for dir in /var/www/html/botmirzapanel*/; do
+        n=${dir%/}; n=${n##*botmirzapanel}
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        [ -f "$dir/config.php" ] && echo "$n"
+    done
+}
+
+# panel_link: the command that connects bots on ANOTHER server to the panel
+# running here, with its address and superadmin login filled in
+cmd_panel_link() {
+    find_panel || die "no Nexra Panel container runs on this server"
+    local host port path cert
+    port=$(panel_var PORT 8000); path=$(panel_var URLPATH dashboard); cert=$(panel_var SSL_CERTFILE)
+    if [ -n "$cert" ]; then
+        host=$(docker exec "$PANEL_C" cat "$cert" 2>/dev/null | openssl x509 -noout -ext subjectAltName 2>/dev/null |
+            grep -o 'DNS:[^,]*' | head -1 | cut -d: -f2 | tr -d ' ')
+        host="https://${host:-$(hostname -f)}"
+    else
+        host="http://$(ip -4 route get 1.1.1.1 2>/dev/null | grep -o 'src [0-9.]*' | cut -d' ' -f2)"
+    fi
+    echo
+    echo "On the server with the bots, run:"
+    echo
+    echo "curl -sLo /root/nexrabot-install.sh $RAW_URL"
+    printf "NEXRA_PANEL_URL=%q NEXRA_PANEL_USER=%q NEXRA_PANEL_PASS=%q bash /root/nexrabot-install.sh migrate-all\n" \
+        "$host:$port/$path" "$(panel_var ADMIN_USERNAME)" "$(panel_var ADMIN_PASSWORD)"
+    echo
+}
+
+cmd_all() {
+    cmd_panel_update
+    if [ -z "$(php_bots)" ] && ! ls "$ETC"/bot*.env >/dev/null 2>&1; then
+        say "no MirzaBot on this server"
+        find_panel && cmd_panel_link
+        return 0
+    fi
+    cmd_migrate_all
+}
+
+register_with_panel() { # N — NEXRA_PANEL_* given, or a Nexra Panel on this server
+    panel_env
     if [ -z "${NEXRA_PANEL_URL:-}" ] || [ -z "${NEXRA_PANEL_USER:-}" ] || [ -z "${NEXRA_PANEL_PASS:-}" ]; then
+        warn "bot $1 is not connected to Nexra Panel (no panel on this server); see: bash install.sh panel-link on the panel's server"
         return 0
     fi
     say "connecting bot $1 to Nexra Panel"
@@ -168,6 +320,7 @@ register_with_panel() { # N — needs NEXRA_PANEL_URL, NEXRA_PANEL_USER, NEXRA_P
 cmd_register() {
     N="${N:?set N= (bot number)}"
     [ -f "$ETC/bot$N.env" ] || die "$ETC/bot$N.env not found"
+    panel_env
     [ -n "${NEXRA_PANEL_URL:-}" ] && [ -n "${NEXRA_PANEL_USER:-}" ] && [ -n "${NEXRA_PANEL_PASS:-}" ] ||
         die "set NEXRA_PANEL_URL, NEXRA_PANEL_USER and NEXRA_PANEL_PASS"
     register_with_panel "$N"
@@ -179,6 +332,7 @@ cmd_migrate_all() {
     [ -f "$self" ] || die "save this script to a file first (curl -sLo /root/nexrabot-install.sh …) and run that file"
     install_binary
     install_unit
+    panel_env
     export NEXRABOT_BIN="$BIN" # every bot below uses the binary just installed
     for dir in /var/www/html/botmirzapanel*/; do
         n=${dir%/}; n=${n##*botmirzapanel}
@@ -462,5 +616,8 @@ case "${1:-new}" in
     keys) N="${N:?set N=}"; print_keys "$N" ;;
     register) cmd_register ;;
     migrate-all) cmd_migrate_all ;;
-    *) die "usage: install.sh [new|migrate|migrate-all|register|rollback|update|keys]" ;;
+    panel-update) cmd_panel_update ;;
+    panel-link) cmd_panel_link ;;
+    all) cmd_all ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|register|panel-update|panel-link|rollback|update|keys]" ;;
 esac

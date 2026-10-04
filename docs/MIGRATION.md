@@ -4,18 +4,33 @@
 اپ تأیید خودکار، `/payment/...` برای درگاه‌ها). پس انتقال فقط یعنی nginx به‌جای php-fpm درخواست‌ها را به ربات Go بدهد. داده‌ای منتقل
 نمی‌شود، وبهوک عوض نمی‌شود و کاربران چیزی حس نمی‌کنند.
 
-## همه‌ی ربات‌های یک سرور با یک دستور
+## همه‌چیز با یک دستور
 
 ```bash
 curl -sLo /root/nexrabot-install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/claude/festive-keller-mmew1s/install.sh
-NEXRA_PANEL_URL=https://panel.example.com/dashboard NEXRA_PANEL_USER=admin NEXRA_PANEL_PASS='رمز' \
-bash /root/nexrabot-install.sh migrate-all
+bash /root/nexrabot-install.sh all
 ```
 
-هر ربات PHP در `/var/www/html/botmirzapanel*` جداگانه و با همه‌ی مراحل پایین منتقل می‌شود. اگر یکی خطا بدهد، فقط همان خودکار به PHP
-برمی‌گردد و بقیه ادامه می‌دهند. هر ربات منتقل‌شده به Nexra Panel وصل و به صاحبش داده می‌شود: ادمینی که نام کاربری‌اش همان ریسلرِ پنل
-Nexra ربات است، وگرنه ادمینی که آیدی عددی تلگرامش ادمین ربات است. دوباره اجرا کردن ضرری ندارد (ربات‌های منتقل‌شده فقط دوباره به پنل
-وصل می‌شوند). خلاصه‌ی آخر کار می‌گوید کدام منتقل شد و کدام نه؛ لاگ هر ربات در `/root/nexrabot-backups/migrate-botN.log`.
+هیچ اطلاعاتی لازم نیست؛ به ترتیب:
+
+1. **Nexra Panel روی همین سرور** پیدا می‌شود (کانتینر docker با نام `nexra-panel`/`whale-panel`، هر پوشه‌ای که باشد). از پوشه‌ی
+   `data` آن بکاپ گرفته می‌شود (`/root/nexrabot-backups/panel-data-<تاریخ>.tar.gz`)، نسخه‌ی تازه از GitHub ساخته و پنل با همان `.env`
+   و همان داده‌ها دوباره بالا می‌آید. اگر ساختن نسخه‌ی تازه خطا بدهد، پنل دست نمی‌خورد؛ اگر پنل تازه بالا نیاید، خودکار نسخه‌ی قبلی
+   برمی‌گردد (نسخه‌ی قبلی با نام `nexra-panel-previous:<تاریخ>` نگه داشته می‌شود).
+2. آدرس، نام کاربری و رمز سوپرادمین پنل از تنظیمات خود پنل (`.env` آن) خوانده می‌شود.
+3. هر ربات PHP در `/var/www/html/botmirzapanel*` جداگانه و با همه‌ی مراحل پایین منتقل می‌شود. اگر یکی خطا بدهد، فقط همان خودکار به
+   PHP برمی‌گردد و بقیه ادامه می‌دهند.
+4. هر ربات به Nexra Panel وصل و به صاحبش داده می‌شود: ادمینی که نام کاربری‌اش همان ریسلرِ پنل Nexra ربات است، وگرنه ادمینی که آیدی
+   عددی تلگرامش ادمین ربات است.
+
+دوباره اجرا کردن ضرری ندارد (ربات‌های منتقل‌شده فقط دوباره به پنل وصل می‌شوند). خلاصه‌ی آخر کار می‌گوید کدام منتقل شد و کدام نه؛ لاگ هر
+ربات در `/root/nexrabot-backups/migrate-botN.log`.
+
+**پنل و ربات‌ها روی دو سرور جدا؟** روی سرور پنل همان `all` را بزنید: پنل به‌روز می‌شود و چون رباتی آن‌جا نیست، دستور آماده (با آدرس و
+رمز پنل) برای سرور ربات‌ها چاپ می‌شود؛ همان را روی سرور ربات‌ها بزنید. (بعداً هم: `bash /root/nexrabot-install.sh panel-link`)
+
+فقط به‌روزکردن پنل: `bash /root/nexrabot-install.sh panel-update` — فقط ربات‌ها با پنلی دیگر:
+`NEXRA_PANEL_URL=https://panel.example.com/dashboard NEXRA_PANEL_USER=admin NEXRA_PANEL_PASS='رمز' bash /root/nexrabot-install.sh migrate-all`
 
 ## انتقال خودکار یک ربات
 

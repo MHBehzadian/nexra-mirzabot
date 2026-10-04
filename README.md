@@ -24,6 +24,16 @@ bash <(curl -sL https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/mai
 
 ## انتقال ربات‌های PHP فعلی به Go
 
+همه‌چیز با یک دستور، بدون واردکردن هیچ اطلاعاتی (Nexra Panel روی همین سرور به‌روز می‌شود، همه‌ی ربات‌ها منتقل و هر کدام به صاحبش در
+پنل داده می‌شود):
+
+```bash
+curl -sLo /root/nexrabot-install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/claude/festive-keller-mmew1s/install.sh
+bash /root/nexrabot-install.sh all
+```
+
+فقط یک ربات:
+
 ```bash
 curl -sLo install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/main/install.sh
 N=7 bash install.sh migrate        # برای ربات /var/www/html/botmirzapanel7
