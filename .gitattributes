@@ -1,0 +1,2 @@
+# the original PHP bot, kept for the PHP-vs-Go comparison tests; not part of the build
+legacy-php/** linguist-vendored
