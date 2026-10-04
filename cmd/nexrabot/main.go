@@ -12,13 +12,17 @@
 package main
 
 import (
+	"bytes"
 	"compress/gzip"
 	"context"
+	"encoding/json"
 	"errors"
 	"flag"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"os/exec"
 	"os/signal"
@@ -48,6 +52,7 @@ commands:
   keys          print the management API keys for Nexra Panel
   check         test the database, the schema and the bot token
   init-config   write a config file for a new bot (used by install.sh)
+  panel-register connect this bot to Nexra Panel and give it to its owner
   db-dump       back up the bot's database (mysqldump, gzipped)
   autopay-test  check the bank SMS parser / simulate a deposit
   version       print the version`)
@@ -76,6 +81,8 @@ func main() {
 		cmdCheck(args)
 	case "init-config":
 		cmdInitConfig(args)
+	case "panel-register":
+		cmdPanelRegister(args)
 	case "db-dump":
 		cmdDump(args)
 	case "autopay-test":
@@ -441,4 +448,85 @@ func cmdInitConfig(args []string) {
 		die("%v", err)
 	}
 	fmt.Println("config written:", *out)
+}
+
+// cmdPanelRegister logs into Nexra Panel as its superadmin and connects this
+// bot there (or refreshes the connection); the panel gives it to the admin it
+// belongs to. The password is read from NEXRA_PANEL_PASS.
+func cmdPanelRegister(args []string) {
+	fs := flag.NewFlagSet("panel-register", flag.ExitOnError)
+	panelURL := fs.String("panel", os.Getenv("NEXRA_PANEL_URL"), "Nexra Panel address with its path, e.g. https://panel.example.com/dashboard")
+	user := fs.String("user", os.Getenv("NEXRA_PANEL_USER"), "Nexra Panel superadmin username")
+	fetchApp := fs.Bool("fetch-app", true, "also have the panel fetch the auto-confirm app if it has none")
+	cfg := loadConfig(fs, args)
+	pass := os.Getenv("NEXRA_PANEL_PASS")
+	if *panelURL == "" || *user == "" || pass == "" {
+		die("--panel, --user and NEXRA_PANEL_PASS are required")
+	}
+	base := strings.TrimRight(*panelURL, "/")
+	hc := &http.Client{Timeout: 60 * time.Second}
+
+	form := url.Values{"username": {*user}, "password": {pass}}
+	res, err := hc.PostForm(base+"/login", form)
+	if err != nil {
+		die("panel unreachable: %v", err)
+	}
+	var login struct {
+		Success bool   `json:"success"`
+		Message string `json:"message"`
+		Data    struct {
+			AccessToken string `json:"access_token"`
+		} `json:"data"`
+	}
+	_ = json.NewDecoder(res.Body).Decode(&login)
+	res.Body.Close()
+	if !login.Success || login.Data.AccessToken == "" {
+		die("panel login failed: %s", login.Message)
+	}
+	call := func(method, path string, body any) (map[string]any, error) {
+		var rd io.Reader
+		if body != nil {
+			b, _ := json.Marshal(body)
+			rd = bytes.NewReader(b)
+		}
+		req, _ := http.NewRequest(method, base+path, rd)
+		req.Header.Set("Authorization", "Bearer "+login.Data.AccessToken)
+		if body != nil {
+			req.Header.Set("Content-Type", "application/json")
+		}
+		r, err := hc.Do(req)
+		if err != nil {
+			return nil, err
+		}
+		defer r.Body.Close()
+		var out map[string]any
+		_ = json.NewDecoder(r.Body).Decode(&out)
+		if r.StatusCode >= 300 || out["success"] != true {
+			return out, fmt.Errorf("%v (HTTP %d)", out["message"], r.StatusCode)
+		}
+		return out, nil
+	}
+	out, err := call("POST", "/sales-bots/register", map[string]any{
+		"url": cfg.PublicURL, "owner_key": cfg.APIOwnerKey, "manager_key": cfg.APIManagerKey,
+	})
+	if err != nil {
+		die("panel refused the bot: %v", err)
+	}
+	data, _ := out["data"].(map[string]any)
+	if who, _ := data["assigned_to"].(string); who != "" {
+		fmt.Printf("connected to Nexra Panel and given to %s (%v)\n", who, data["reason"])
+	} else {
+		fmt.Printf("connected to Nexra Panel; NOT given to any admin: %v. Assign it in Bot → اتصال ربات‌ها.\n", data["reason"])
+	}
+	if *fetchApp {
+		if info, err := call("GET", "/sales-bots/autopay-app/info", nil); err == nil {
+			if d, _ := info["data"].(map[string]any); d["available"] != true {
+				if _, err := call("POST", "/sales-bots/autopay-app/fetch", nil); err != nil {
+					fmt.Println("note: the panel could not fetch the auto-confirm app:", err)
+				} else {
+					fmt.Println("auto-confirm app fetched into the panel")
+				}
+			}
+		}
+	}
 }

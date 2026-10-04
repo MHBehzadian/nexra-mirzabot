@@ -18,6 +18,15 @@
 #   Show the keys Nexra Panel needs:
 #     N=7 bash install.sh keys
 #
+#   Move EVERY PHP bot on this server (/var/www/html/botmirzapanel*) to Go,
+#   one by one, and connect each to Nexra Panel under its owner:
+#     curl -sLo /root/nexrabot-install.sh <raw url of this file>
+#     NEXRA_PANEL_URL=https://panel.example.com/dashboard NEXRA_PANEL_USER=admin \
+#     NEXRA_PANEL_PASS='...' bash /root/nexrabot-install.sh migrate-all
+#   A bot that fails is put back on PHP by itself and the others carry on.
+#   Without the NEXRA_PANEL_* variables the bots are migrated but not
+#   connected; connect them later with:  N=7 bash install.sh register
+#
 # Optional: NEXRABOT_BIN=/path/to/nexrabot uses a local binary instead of
 # downloading the latest release; RELEASE=v6.0.0 pins a release.
 # =============================================================================
@@ -53,7 +62,15 @@ install_binary() {
         local base="https://github.com/$REPO/releases/latest/download"
         [ "$RELEASE" != latest ] && base="https://github.com/$REPO/releases/download/$RELEASE"
         say "downloading nexrabot ($arch) from $base"
-        curl -fsSL "$base/nexrabot-linux-$arch" -o "$BIN.new" || die "download failed"
+        if ! curl -fsSL "$base/nexrabot-linux-$arch" -o "$BIN.new"; then
+            # no stable release yet: take the newest one (pre-releases too)
+            local tag
+            tag=$(curl -fsSL "https://api.github.com/repos/$REPO/releases?per_page=1" | grep -m1 '"tag_name"' | cut -d'"' -f4 || true)
+            [ "$RELEASE" = latest ] && [ -n "$tag" ] || die "download failed (is there a release on github.com/$REPO?)"
+            base="https://github.com/$REPO/releases/download/$tag"
+            say "no stable release; using $tag"
+            curl -fsSL "$base/nexrabot-linux-$arch" -o "$BIN.new" || die "download failed"
+        fi
         if curl -fsSL "$base/SHA256SUMS" -o /tmp/nexrabot.sums 2>/dev/null; then
             local want got
             want=$(grep " nexrabot-linux-$arch\$" /tmp/nexrabot.sums | awk '{print $1}')
@@ -133,6 +150,62 @@ print_keys() { # N
     "$BIN" keys -c "$ETC/bot$1.env"
     echo
     echo "Nexra Panel → Bot → افزودن ربات: address https://$(grep '^DOMAIN=' "$ETC/bot$1.env" | cut -d= -f2), and the two keys above."
+}
+
+# ----------------------------------------------------------------- Nexra Panel
+
+register_with_panel() { # N — needs NEXRA_PANEL_URL, NEXRA_PANEL_USER, NEXRA_PANEL_PASS
+    if [ -z "${NEXRA_PANEL_URL:-}" ] || [ -z "${NEXRA_PANEL_USER:-}" ] || [ -z "${NEXRA_PANEL_PASS:-}" ]; then
+        return 0
+    fi
+    say "connecting bot $1 to Nexra Panel"
+    if ! "$BIN" panel-register -c "$ETC/bot$1.env"; then
+        warn "bot $1 runs, but connecting it to Nexra Panel failed; retry with: N=$1 bash install.sh register"
+        return 1
+    fi
+}
+
+cmd_register() {
+    N="${N:?set N= (bot number)}"
+    [ -f "$ETC/bot$N.env" ] || die "$ETC/bot$N.env not found"
+    [ -n "${NEXRA_PANEL_URL:-}" ] && [ -n "${NEXRA_PANEL_USER:-}" ] && [ -n "${NEXRA_PANEL_PASS:-}" ] ||
+        die "set NEXRA_PANEL_URL, NEXRA_PANEL_USER and NEXRA_PANEL_PASS"
+    register_with_panel "$N"
+}
+
+cmd_migrate_all() {
+    local self ok=() failed=() skipped=() dir n
+    self=$(readlink -f "$0")
+    [ -f "$self" ] || die "save this script to a file first (curl -sLo /root/nexrabot-install.sh …) and run that file"
+    install_binary
+    install_unit
+    export NEXRABOT_BIN="$BIN" # every bot below uses the binary just installed
+    for dir in /var/www/html/botmirzapanel*/; do
+        n=${dir%/}; n=${n##*botmirzapanel}
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        [ -f "$dir/config.php" ] || continue
+        if systemctl is-active --quiet "nexrabot@$n"; then
+            say "bot $n already runs on Go"
+            register_with_panel "$n" || true
+            skipped+=("$n")
+            continue
+        fi
+        echo
+        say "======== bot $n ========"
+        set +e
+        N="$n" PHP_DIR="${dir%/}" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
+        local rc=${PIPESTATUS[0]}
+        set -e
+        if [ "$rc" = 0 ]; then ok+=("$n"); else failed+=("$n"); fi
+    done
+    echo
+    echo "=========================================="
+    echo "moved to Go:        ${ok[*]:-—}"
+    echo "already on Go:      ${skipped[*]:-—}"
+    echo "failed (still PHP): ${failed[*]:-—}"
+    [ ${#failed[@]} -gt 0 ] && echo "logs:               $BACKUPS/migrate-bot<N>.log"
+    echo "=========================================="
+    [ ${#failed[@]} -eq 0 ]
 }
 
 # ----------------------------------------------------------------- new bot
@@ -322,6 +395,8 @@ cmd_migrate() {
     say "securing the webhook with a secret token"
     "$BIN" set-webhook -c "$CFG" || warn "set-webhook failed; the bot still works (updates are accepted from Telegram's addresses)"
 
+    register_with_panel "$N" || true
+
     # the hourly backup script of the PHP installer keeps working as it is
     echo
     echo "=========================================="
@@ -385,5 +460,7 @@ case "${1:-new}" in
     rollback) cmd_rollback ;;
     update) cmd_update ;;
     keys) N="${N:?set N=}"; print_keys "$N" ;;
-    *) die "usage: install.sh [new|migrate|rollback|update|keys]" ;;
+    register) cmd_register ;;
+    migrate-all) cmd_migrate_all ;;
+    *) die "usage: install.sh [new|migrate|migrate-all|register|rollback|update|keys]" ;;
 esac

@@ -6,8 +6,8 @@ name: Release
 #                                                    which Nexra Panel can fetch
 #
 # Or run it by hand (Actions → Release → Run workflow) on any branch with a
-# tag like v6.0.0-beta.1: that publishes a pre-release from that branch, for
-# testing before main. Use it with: RELEASE=v6.0.0-beta.1 bash install.sh …
+# tag: v6.0.0 publishes a release from that branch, v6.0.0-beta.1 a
+# pre-release (use it with RELEASE=v6.0.0-beta.1 bash install.sh …).
 on:
   push:
     tags: ['v*']
@@ -63,7 +63,9 @@ jobs:
   release:
     needs: [bot, apk]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || inputs.tag != ''
+    # the bot binaries must not wait on the phone app: publish them even if
+    # the APK build failed
+    if: always() && needs.bot.result == 'success' && (startsWith(github.ref, 'refs/tags/') || inputs.tag != '')
     steps:
       - uses: actions/checkout@v4
       - uses: actions/download-artifact@v4
@@ -72,12 +74,12 @@ jobs:
           merge-multiple: true
       - run: |
           cp install.sh dist/
-          cd dist && sha256sum nexrabot-linux-* nexra-autopay.apk install.sh > SHA256SUMS && cat SHA256SUMS
+          cd dist && sha256sum nexrabot-linux-* install.sh $(ls nexra-autopay.apk 2>/dev/null) > SHA256SUMS && cat SHA256SUMS
       - uses: softprops/action-gh-release@v2
         with:
           files: dist/*
           generate_release_notes: true
-          # a hand-run release is a pre-release made from the branch it ran on
+          # made from the branch it ran on; a tag with "-" (v6.0.0-beta.1) is a pre-release
           tag_name: ${{ inputs.tag || github.ref_name }}
           target_commitish: ${{ github.sha }}
-          prerelease: ${{ inputs.tag != '' || contains(github.ref_name, '-') }}
+          prerelease: ${{ contains(inputs.tag || github.ref_name, '-') }}

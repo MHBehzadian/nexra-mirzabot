@@ -4,7 +4,20 @@
 اپ تأیید خودکار، `/payment/...` برای درگاه‌ها). پس انتقال فقط یعنی nginx به‌جای php-fpm درخواست‌ها را به ربات Go بدهد. داده‌ای منتقل
 نمی‌شود، وبهوک عوض نمی‌شود و کاربران چیزی حس نمی‌کنند.
 
-## انتقال خودکار (پیشنهادی)
+## همه‌ی ربات‌های یک سرور با یک دستور
+
+```bash
+curl -sLo /root/nexrabot-install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/claude/festive-keller-mmew1s/install.sh
+NEXRA_PANEL_URL=https://panel.example.com/dashboard NEXRA_PANEL_USER=admin NEXRA_PANEL_PASS='رمز' \
+bash /root/nexrabot-install.sh migrate-all
+```
+
+هر ربات PHP در `/var/www/html/botmirzapanel*` جداگانه و با همه‌ی مراحل پایین منتقل می‌شود. اگر یکی خطا بدهد، فقط همان خودکار به PHP
+برمی‌گردد و بقیه ادامه می‌دهند. هر ربات منتقل‌شده به Nexra Panel وصل و به صاحبش داده می‌شود: ادمینی که نام کاربری‌اش همان ریسلرِ پنل
+Nexra ربات است، وگرنه ادمینی که آیدی عددی تلگرامش ادمین ربات است. دوباره اجرا کردن ضرری ندارد (ربات‌های منتقل‌شده فقط دوباره به پنل
+وصل می‌شوند). خلاصه‌ی آخر کار می‌گوید کدام منتقل شد و کدام نه؛ لاگ هر ربات در `/root/nexrabot-backups/migrate-botN.log`.
+
+## انتقال خودکار یک ربات
 
 ```bash
 curl -sLo install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/main/install.sh
