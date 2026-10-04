@@ -38,7 +38,7 @@
 #     bash install.sh panel-update
 #
 # Optional: NEXRABOT_BIN=/path/to/nexrabot uses a local binary instead of
-# downloading the latest release; RELEASE=v6.0.1 pins a release.
+# downloading the latest release; RELEASE=v6.0.2 pins a release.
 # =============================================================================
 set -Eeuo pipefail
 
@@ -305,7 +305,9 @@ cmd_all() {
 }
 
 register_with_panel() { # N — NEXRA_PANEL_* given, or a Nexra Panel on this server
+    [ "${NEXRABOT_DEFER_REGISTER:-}" = 1 ] && return 0 # migrate-all connects them all at the end
     panel_env
+    shared_ids_env
     if [ -z "${NEXRA_PANEL_URL:-}" ] || [ -z "${NEXRA_PANEL_USER:-}" ] || [ -z "${NEXRA_PANEL_PASS:-}" ]; then
         warn "bot $1 is not connected to Nexra Panel (no panel on this server); see: bash install.sh panel-link on the panel's server"
         return 0
@@ -326,6 +328,52 @@ cmd_register() {
     register_with_panel "$N"
 }
 
+# shared_admin_ids N... — the Telegram ids that are admin on every one of these
+# bots (with two or more bots): the server owner's own id, which says nothing
+# about whose bot it is. NEXRA_OWNER_ID adds ids by hand.
+shared_admin_ids() {
+    local common="" n ids
+    if [ $# -ge 2 ]; then
+        for n in "$@"; do
+            ids=$("$BIN" admin-ids -c "$ETC/bot$n.env" 2>/dev/null | sort -u) && [ -n "$ids" ] || continue # unreadable: left out
+            if [ -z "$common" ]; then common="$ids"; else common=$(comm -12 <(echo "$common") <(echo "$ids")); fi
+            [ -n "$common" ] || break
+        done
+    fi
+    local extra="${NEXRA_OWNER_ID:-}"
+    printf '%s\n' $common ${extra//,/ } | grep -E '^[0-9]+$' | sort -u | paste -sd, - || true
+}
+
+running_bots() { # numbers of the Go bots running here
+    local f n
+    for f in "$ETC"/bot*.env; do
+        [ -f "$f" ] || continue
+        n=${f##*/bot}; n=${n%.env}
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        systemctl is-active --quiet "nexrabot@$n" && echo "$n"
+    done
+}
+
+shared_ids_env() { # once: NEXRA_PANEL_IGNORE_IDS from every bot running here
+    [ -n "${NEXRA_PANEL_IGNORE_IDS+x}" ] && return 0
+    NEXRA_PANEL_IGNORE_IDS=$(shared_admin_ids $(running_bots))
+    export NEXRA_PANEL_IGNORE_IDS
+    if [ -n "$NEXRA_PANEL_IGNORE_IDS" ]; then
+        say "admin on every bot, so not used to find whose bot it is: $NEXRA_PANEL_IGNORE_IDS"
+    fi
+}
+
+# register_all N... — connect these bots to Nexra Panel, each to its owner
+register_all() {
+    [ $# -gt 0 ] || return 0
+    panel_env
+    local n
+    shared_ids_env
+    for n in "$@"; do
+        register_with_panel "$n" || true
+    done
+}
+
 cmd_migrate_all() {
     local self ok=() failed=() skipped=() dir n
     self=$(readlink -f "$0")
@@ -340,18 +388,18 @@ cmd_migrate_all() {
         [ -f "$dir/config.php" ] || continue
         if systemctl is-active --quiet "nexrabot@$n"; then
             say "bot $n already runs on Go"
-            register_with_panel "$n" || true
             skipped+=("$n")
             continue
         fi
         echo
         say "======== bot $n ========"
         set +e
-        N="$n" PHP_DIR="${dir%/}" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
+        NEXRABOT_DEFER_REGISTER=1 N="$n" PHP_DIR="${dir%/}" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
         local rc=${PIPESTATUS[0]}
         set -e
         if [ "$rc" = 0 ]; then ok+=("$n"); else failed+=("$n"); fi
     done
+    register_all "${ok[@]}" "${skipped[@]}"
     echo
     echo "=========================================="
     echo "moved to Go:        ${ok[*]:-—}"

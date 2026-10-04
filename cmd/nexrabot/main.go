@@ -56,6 +56,7 @@ commands:
   panel-register connect this bot to Nexra Panel and give it to its owner
   db-dump       back up the bot's database (mysqldump, gzipped)
   autopay-test  check the bank SMS parser / simulate a deposit
+  admin-ids     print the bot admins' Telegram ids (main admin first)
   version       print the version`)
 	os.Exit(2)
 }
@@ -88,6 +89,8 @@ func main() {
 		cmdDump(args)
 	case "autopay-test":
 		cmdAutopayTest(args)
+	case "admin-ids":
+		cmdAdminIDs(args)
 	case "version", "--version", "-v":
 		fmt.Println(bot.Version)
 	default:
@@ -451,6 +454,22 @@ func cmdInitConfig(args []string) {
 	fmt.Println("config written:", *out)
 }
 
+// cmdAdminIDs prints the bot's admins' Telegram ids (the main admin first),
+// one per line; install.sh uses it to find the id that is admin everywhere.
+func cmdAdminIDs(args []string) {
+	fs := flag.NewFlagSet("admin-ids", flag.ExitOnError)
+	cfg := loadConfig(fs, args)
+	d := openDB(cfg)
+	seen := map[string]bool{}
+	for _, id := range append([]string{cfg.AdminID}, d.AdminIDs()...) {
+		id = strings.TrimSpace(id)
+		if id != "" && !seen[id] {
+			seen[id] = true
+			fmt.Println(id)
+		}
+	}
+}
+
 // cmdPanelRegister logs into Nexra Panel as its superadmin and connects this
 // bot there (or refreshes the connection); the panel gives it to the admin it
 // belongs to. The password is read from NEXRA_PANEL_PASS.
@@ -459,6 +478,8 @@ func cmdPanelRegister(args []string) {
 	panelURL := fs.String("panel", os.Getenv("NEXRA_PANEL_URL"), "Nexra Panel address with its path, e.g. https://panel.example.com/dashboard")
 	user := fs.String("user", os.Getenv("NEXRA_PANEL_USER"), "Nexra Panel superadmin username")
 	fetchApp := fs.Bool("fetch-app", true, "also have the panel fetch the auto-confirm app if it has none")
+	ignore := fs.String("ignore-ids", os.Getenv("NEXRA_PANEL_IGNORE_IDS"),
+		"comma-separated Telegram ids that are admin on every bot (the panel owner's); not used to pick the bot's owner")
 	cfg := loadConfig(fs, args)
 	pass := os.Getenv("NEXRA_PANEL_PASS")
 	if *panelURL == "" || *user == "" || pass == "" {
@@ -513,8 +534,13 @@ func cmdPanelRegister(args []string) {
 		}
 		return out, nil
 	}
+	ignoreIDs := []string{}
+	for _, id := range strings.FieldsFunc(*ignore, func(r rune) bool { return r == ',' || r == ' ' }) {
+		ignoreIDs = append(ignoreIDs, id)
+	}
 	out, err := call("POST", "/sales-bots/register", map[string]any{
 		"url": cfg.PublicURL, "owner_key": cfg.APIOwnerKey, "manager_key": cfg.APIManagerKey,
+		"ignore_ids": ignoreIDs,
 	})
 	if err != nil {
 		die("panel refused the bot: %v", err)
