@@ -27,6 +27,7 @@ func (c *Ctx) secCommands() bool {
 		c.setUser("Processing_value", "0")
 		c.setUser("Processing_value_one", "0")
 		c.setUser("Processing_value_tow", "0")
+		c.dropReplyKeyboard()
 		c.send(c.fromID, c.texts["text_start"], c.kbMain(), "html")
 		c.step("home")
 		return true
@@ -111,6 +112,7 @@ func (c *Ctx) secCommands() bool {
 		if c.datain == "backuser" {
 			c.del()
 		}
+		c.dropReplyKeyboard()
 		c.send(c.fromID, T("users.back"), c.kbMain(), "html")
 		c.step("home")
 		return true

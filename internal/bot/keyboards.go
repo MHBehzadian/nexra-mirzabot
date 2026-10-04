@@ -1,6 +1,9 @@
 package bot
 
 import (
+	"encoding/json"
+	"strings"
+
 	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
 	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
 )
@@ -34,9 +37,17 @@ func (c *Ctx) mainLabel(key string) string {
 
 // kbMainFor is $keyboard for a given recipient (the PHP code built it for
 // $from_id even when sending to someone else; here the admin row only goes to
-// admins).
-func (c *Ctx) kbMainFor(id string) *tg.ReplyKeyboard {
+// admins). In inline mode the same rows become buttons on the message, whose
+// taps menuTap turns back into the label text.
+func (c *Ctx) kbMainFor(id string) tg.Markup {
 	bc := LoadButtons(c.db())
+	inline := bc.Mode == MenuInline
+	button := func(key, label string) B {
+		if inline {
+			return bc.styled(key, cb(label, menuTapPrefix+key))
+		}
+		return bc.styled(key, tg.Txt(label))
+	}
 	var rows [][]B
 	for _, keys := range bc.Layout {
 		var r []B
@@ -44,19 +55,59 @@ func (c *Ctx) kbMainFor(id string) *tg.ReplyKeyboard {
 			if bc.Buttons[k].Hidden {
 				continue
 			}
-			r = append(r, bc.styled(k, tg.Txt(c.mainLabel(k))))
+			r = append(r, button(k, c.mainLabel(k)))
 		}
 		if len(r) > 0 {
 			rows = append(rows, r)
 		}
 	}
 	if c.isAdminID(id) {
-		rows = append(rows, row(bc.styled("admin", tg.Txt(T("Admin.commendadmin")))))
+		rows = append(rows, row(button("admin", T("Admin.commendadmin"))))
+	}
+	if inline {
+		return ik(rows...)
 	}
 	return rk(rows...)
 }
 
-func (c *Ctx) kbMain() *tg.ReplyKeyboard { return c.kbMainFor(c.fromID) }
+func (c *Ctx) kbMain() tg.Markup { return c.kbMainFor(c.fromID) }
+
+// menuTap turns a tap on an inline main-menu button into the label text, so
+// it takes exactly the path of the same button on the keyboard.
+func (c *Ctx) menuTap() {
+	if !strings.HasPrefix(c.datain, menuTapPrefix) {
+		return
+	}
+	key := strings.TrimPrefix(c.datain, menuTapPrefix)
+	known := key == "admin" && c.isAdmin
+	for _, k := range MainButtonKeys {
+		known = known || k == key
+	}
+	if !known {
+		return
+	}
+	label := c.mainLabel(key)
+	if label == "" {
+		return
+	}
+	c.b.TG.AnswerCallback(c.callbackQueryID, "", false)
+	c.text, c.textIn, c.datain, c.callbackQueryID = label, label, "", ""
+}
+
+// dropReplyKeyboard clears the keyboard under the text field (left from the
+// keyboard menu) when the menu is inline: a throwaway message removes it.
+func (c *Ctx) dropReplyKeyboard() {
+	if LoadButtons(c.db()).Mode != MenuInline {
+		return
+	}
+	r := c.b.TG.SendMessage(c.fromID, "…", map[string]any{"remove_keyboard": true}, "")
+	var m struct {
+		MessageID int64 `json:"message_id"`
+	}
+	if r.OK && json.Unmarshal(r.Result, &m) == nil && m.MessageID != 0 {
+		c.b.TG.DeleteMessage(c.fromID, m.MessageID)
+	}
+}
 
 func (c *Ctx) kbPanel() *tg.InlineKeyboard {
 	bc := LoadButtons(c.db())

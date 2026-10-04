@@ -401,3 +401,56 @@ func emptyNil(s string) any {
 	}
 	return s
 }
+
+// Sticker is the part of a sticker (custom emoji) the panel needs.
+type Sticker struct {
+	FileID        string `json:"file_id"`
+	Emoji         string `json:"emoji"`
+	CustomEmojiID string `json:"custom_emoji_id"`
+	IsAnimated    bool   `json:"is_animated"`
+	IsVideo       bool   `json:"is_video"`
+	Thumbnail     *struct {
+		FileID string `json:"file_id"`
+	} `json:"thumbnail"`
+}
+
+// PreviewFileID is a still image of the sticker, if Telegram has one.
+func (s Sticker) PreviewFileID() string {
+	if s.Thumbnail != nil && s.Thumbnail.FileID != "" {
+		return s.Thumbnail.FileID
+	}
+	if !s.IsAnimated && !s.IsVideo {
+		return s.FileID // static stickers are .webp images already
+	}
+	return ""
+}
+
+// GetCustomEmojiStickers resolves custom emoji ids (at most 200).
+func (c *Client) GetCustomEmojiStickers(ids []string) ([]Sticker, error) {
+	r := c.Call("getCustomEmojiStickers", map[string]any{"custom_emoji_ids": ids})
+	if !r.OK {
+		return nil, fmt.Errorf("getCustomEmojiStickers: %s", r.Description)
+	}
+	var out []Sticker
+	err := json.Unmarshal(r.Result, &out)
+	return out, err
+}
+
+// StickerSet is a sticker or custom emoji pack.
+type StickerSet struct {
+	Name        string    `json:"name"`
+	Title       string    `json:"title"`
+	StickerType string    `json:"sticker_type"`
+	Stickers    []Sticker `json:"stickers"`
+}
+
+// GetStickerSet loads a pack by its short name (t.me/addemoji/<name>).
+func (c *Client) GetStickerSet(name string) (StickerSet, error) {
+	r := c.Call("getStickerSet", map[string]any{"name": name})
+	if !r.OK {
+		return StickerSet{}, fmt.Errorf("getStickerSet: %s", r.Description)
+	}
+	var out StickerSet
+	err := json.Unmarshal(r.Result, &out)
+	return out, err
+}

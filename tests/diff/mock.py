@@ -138,6 +138,18 @@ class H(BaseHTTPRequestHandler):
             return self.send(200, {"ok": True, "result": {"id": 1, "is_bot": True, "first_name": "t", "username": "testbot"}})
         if m == "getfile":
             return self.send(200, {"ok": True, "result": {"file_id": params.get("file_id"), "file_path": "photos/x.jpg"}})
+        if m == "getcustomemojistickers":
+            ids = params.get("custom_emoji_ids") or []
+            return self.send(200, {"ok": True, "result": [
+                {"file_id": "sticker-" + i, "emoji": "⭐", "custom_emoji_id": i, "is_animated": True, "is_video": False,
+                 "thumbnail": {"file_id": "thumb-" + i}} for i in ids if not i.startswith("404")]})
+        if m == "getstickerset":
+            if params.get("name") != "NexraPack":
+                return self.send(400, {"ok": False, "error_code": 400, "description": "Bad Request: STICKERSET_INVALID"})
+            return self.send(200, {"ok": True, "result": {"name": "NexraPack", "title": "Nexra", "sticker_type": "custom_emoji", "stickers": [
+                {"file_id": "s1", "emoji": "🛒", "custom_emoji_id": "5368324170671202286", "is_animated": False, "is_video": False},
+                {"file_id": "s2", "emoji": "💎", "custom_emoji_id": "5368324170671202287", "is_animated": True, "is_video": False,
+                 "thumbnail": {"file_id": "t2"}}]}})
         if m in ("answercallbackquery", "deletemessage", "setwebhook"):
             return self.send(200, {"ok": True, "result": True})
         return self.send(200, {"ok": True, "result": {"message_id": mid, "chat": {"id": params.get("chat_id")}, "date": now()}})

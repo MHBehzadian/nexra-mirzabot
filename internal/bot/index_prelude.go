@@ -117,6 +117,7 @@ func (c *Ctx) prelude() bool {
 		return true
 	}
 	c.loadTexts()
+	c.menuTap()
 	c.channels = d.Select("channels", "*", "", nil)
 
 	if c.user.S("username") == "none" || c.user.IsNull("username") {
@@ -265,6 +266,7 @@ func (c *Ctx) referral() bool {
 		d.Update("user", "Balance", php.NumStr(bal), "id", affID)
 		c.send(affID, sprintf("users.affiliates.giftuser", nf(aff.F("price_Discount")), c.fromID), nil, "html")
 	}
+	c.dropReplyKeyboard()
 	c.send(c.fromID, c.texts["text_start"], c.kbMain(), "html")
 	inviter := d.Select("user", "*", "id", affID)
 	d.Update("user", "affiliates", affID, "id", c.fromID)

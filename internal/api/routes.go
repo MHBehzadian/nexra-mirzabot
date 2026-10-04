@@ -22,6 +22,8 @@ func (a *API) routes() {
 	a.handle("PUT /api/v1/texts", roleManager, a.putTexts)
 	a.handle("GET /api/v1/buttons", roleManager, a.getButtons)
 	a.handle("PUT /api/v1/buttons", roleManager, a.putButtons)
+	a.handle("GET /api/v1/emoji/{id}", roleManager, a.emojiPreview)
+	a.handle("GET /api/v1/emoji-pack/{name}", roleManager, a.emojiPack)
 
 	// catalogue
 	a.handle("GET /api/v1/products", roleManager, a.listProducts)
@@ -283,6 +285,7 @@ func (a *API) getButtons(w http.ResponseWriter, r *http.Request) {
 	ok(w, map[string]any{
 		"layout":     bc.Layout,
 		"buttons":    bc.Buttons,
+		"mode":       menuMode(bc.Mode),
 		"labels":     labels,
 		"main_keys":  bot.MainButtonKeys,
 		"extra_keys": bot.ExtraStyleKeys,
@@ -308,8 +311,20 @@ func (a *API) putButtons(w http.ResponseWriter, r *http.Request) {
 	if in.Buttons == nil {
 		in.Buttons = cur.Buttons
 	}
+	if in.Mode == "" {
+		in.Mode = cur.Mode
+	} else if in.Mode == "reply" {
+		in.Mode = ""
+	}
 	bot.StoreButtons(a.B.DB, in)
 	a.getButtons(w, r)
+}
+
+func menuMode(m string) string {
+	if m == bot.MenuInline {
+		return bot.MenuInline
+	}
+	return "reply"
 }
 
 func jsonOf(v any) string {

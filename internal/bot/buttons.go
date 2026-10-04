@@ -25,7 +25,16 @@ type ButtonStyle struct {
 type ButtonConfig struct {
 	Layout  [][]string             `json:"layout"`
 	Buttons map[string]ButtonStyle `json:"buttons"`
+	// Mode is how the main menu is shown: "" (the PHP bot's keyboard under
+	// the text field) or MenuInline (buttons attached to the bot's message).
+	Mode string `json:"mode,omitempty"`
 }
+
+// MenuInline shows the main menu as inline ("glass") buttons.
+const MenuInline = "inline"
+
+// menuTapPrefix starts the callback data of an inline main-menu button.
+const menuTapPrefix = "nxm_"
 
 // MainButtonKeys are the menu buttons and where their label comes from.
 // textbot ids for most, a fixed text for affiliates and the admin entry.
@@ -93,6 +102,9 @@ func validLayout(l [][]string) bool {
 // styles are dropped, missing main buttons are appended so none disappears.
 func SanitizeButtons(in ButtonConfig) ButtonConfig {
 	out := ButtonConfig{Buttons: map[string]ButtonStyle{}}
+	if in.Mode == MenuInline {
+		out.Mode = MenuInline
+	}
 	known := map[string]bool{}
 	for _, k := range MainButtonKeys {
 		known[k] = true
@@ -170,6 +182,11 @@ func ValidateButtons(in ButtonConfig) error {
 	main := map[string]bool{}
 	for _, k := range MainButtonKeys {
 		main[k] = true
+	}
+	switch in.Mode {
+	case "", "reply", MenuInline:
+	default:
+		return fmt.Errorf("mode must be reply or inline")
 	}
 	for _, row := range in.Layout {
 		if len(row) > 4 {

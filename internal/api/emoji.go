@@ -1,0 +1,94 @@
+package api
+
+import (
+	"net/http"
+	"regexp"
+	"strings"
+	"sync"
+)
+
+// Premium (custom) emoji for the button editor: a still preview of an emoji
+// id, and the emoji of a pack so they can be picked instead of typed.
+
+var (
+	emojiID   = regexp.MustCompile(`^[0-9]{5,25}$`)
+	packName  = regexp.MustCompile(`^[A-Za-z0-9_]{1,64}$`)
+	emojiMu   sync.Mutex
+	emojiImgs = map[string]emojiImg{}
+)
+
+type emojiImg struct {
+	data  []byte
+	ctype string
+}
+
+func (a *API) emojiPreview(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	if !emojiID.MatchString(id) {
+		fail(w, 400, "not a custom emoji id")
+		return
+	}
+	emojiMu.Lock()
+	img, ok := emojiImgs[id]
+	emojiMu.Unlock()
+	if !ok {
+		st, err := a.B.TG.GetCustomEmojiStickers([]string{id})
+		if err != nil || len(st) == 0 {
+			fail(w, 404, "unknown custom emoji")
+			return
+		}
+		fid := st[0].PreviewFileID()
+		if fid == "" {
+			fail(w, 404, "this emoji has no still preview")
+			return
+		}
+		data, ctype, err := a.B.TG.DownloadFile(fid)
+		if err != nil || len(data) == 0 {
+			fail(w, 502, "could not download the emoji")
+			return
+		}
+		if ctype == "" || ctype == "application/octet-stream" {
+			ctype = "image/webp"
+			if len(data) > 3 && data[0] == 0xFF && data[1] == 0xD8 {
+				ctype = "image/jpeg"
+			}
+		}
+		img = emojiImg{data, ctype}
+		emojiMu.Lock()
+		if len(emojiImgs) > 2000 {
+			emojiImgs = map[string]emojiImg{}
+		}
+		emojiImgs[id] = img
+		emojiMu.Unlock()
+	}
+	w.Header().Set("Content-Type", img.ctype)
+	w.Header().Set("Cache-Control", "private, max-age=86400")
+	w.Write(img.data)
+}
+
+func (a *API) emojiPack(w http.ResponseWriter, r *http.Request) {
+	name := strings.TrimSpace(r.PathValue("name"))
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if !packName.MatchString(name) {
+		fail(w, 400, "give the pack link (t.me/addemoji/NAME) or its name")
+		return
+	}
+	set, err := a.B.TG.GetStickerSet(name)
+	if err != nil {
+		fail(w, 404, "pack not found")
+		return
+	}
+	if set.StickerType != "custom_emoji" {
+		fail(w, 400, "this is a sticker pack, not an emoji pack")
+		return
+	}
+	out := []map[string]any{}
+	for _, s := range set.Stickers {
+		if s.CustomEmojiID != "" {
+			out = append(out, map[string]any{"id": s.CustomEmojiID, "emoji": s.Emoji, "preview": s.PreviewFileID() != ""})
+		}
+	}
+	ok(w, map[string]any{"name": set.Name, "title": set.Title, "emojis": out})
+}
