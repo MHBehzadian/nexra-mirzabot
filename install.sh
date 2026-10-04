@@ -493,6 +493,8 @@ EOF
     echo "database: $DBNAME / $DBUSER / $DBPASS"
     print_keys "$N"
     echo "=========================================="
+    # into Nexra Panel too, when it runs here or NEXRA_PANEL_* are given
+    register_with_panel "$N" || true
 }
 
 # ----------------------------------------------------------------- migrate a PHP bot
