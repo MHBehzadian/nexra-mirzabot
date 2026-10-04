@@ -157,3 +157,41 @@ func (a *API) emojiSets(w http.ResponseWriter, r *http.Request) {
 	}
 	ok(w, map[string]any{"sets": sets, "unknown": unknown})
 }
+
+// Colours and icons of the other buttons (categories, products, locations,
+// payment methods…), by button text.
+func (a *API) getLabelStyles(w http.ResponseWriter, r *http.Request) {
+	ok(w, map[string]any{"styles": bot.LoadLabelStyles(a.B.DB), "suggestions": a.B.LabelSuggestions()})
+}
+
+func (a *API) putLabelStyles(w http.ResponseWriter, r *http.Request) {
+	var in struct {
+		Styles map[string]bot.LabelStyle `json:"styles"`
+	}
+	if err := decode(r, &in); err != nil {
+		fail(w, 400, err.Error())
+		return
+	}
+	if len(in.Styles) > bot.MaxLabelStyles {
+		fail(w, 400, "too many buttons")
+		return
+	}
+	for label, s := range in.Styles {
+		switch {
+		case strings.TrimSpace(label) == "" || len([]rune(label)) > 200:
+			fail(w, 400, "a button text is empty or too long")
+			return
+		case s.Style != "" && s.Style != "primary" && s.Style != "success" && s.Style != "danger":
+			fail(w, 400, label+": unknown colour "+s.Style)
+			return
+		case s.Emoji != "" && !emojiID.MatchString(s.Emoji):
+			fail(w, 400, label+": not a custom emoji id")
+			return
+		case s.Emoji != "" && !bot.EmojiAllowed(a.B.DB, s.Emoji):
+			fail(w, 400, label+": this premium emoji is not in the allowed packs")
+			return
+		}
+	}
+	a.B.StoreLabelStyles(in.Styles)
+	a.getLabelStyles(w, r)
+}

@@ -38,7 +38,7 @@
 #     bash install.sh panel-update
 #
 # Optional: NEXRABOT_BIN=/path/to/nexrabot uses a local binary instead of
-# downloading the latest release; RELEASE=v6.0.4 pins a release.
+# downloading the latest release; RELEASE=v6.0.5 pins a release.
 # =============================================================================
 set -Eeuo pipefail
 

@@ -21,6 +21,22 @@ type Client struct {
 	Base  string // https://api.telegram.org
 	HTTP  *http.Client
 	Log   *log.Logger
+	// Decorate, if set, may rewrite every reply_markup before it is sent
+	// (the bot uses it to colour buttons by their text).
+	Decorate func(markup any) any
+}
+
+func (c *Client) decorate(params map[string]any) map[string]any {
+	m, ok := params["reply_markup"]
+	if c.Decorate == nil || !ok || m == nil {
+		return params
+	}
+	out := make(map[string]any, len(params))
+	for k, v := range params {
+		out[k] = v
+	}
+	out["reply_markup"] = c.Decorate(m)
+	return out
 }
 
 func New(token, base, proxy string) *Client {
@@ -52,6 +68,7 @@ func (c *Client) logf(format string, a ...any) {
 // Call sends a method with JSON parameters. Nil values are dropped, the way
 // an unset PHP array entry would be.
 func (c *Client) Call(method string, params map[string]any) Response {
+	params = c.decorate(params)
 	r := c.call(method, params)
 	if !r.OK && r.ErrorCode == 400 {
 		// Coloured buttons, premium-emoji button icons and <tg-emoji> in text
@@ -168,6 +185,7 @@ func (c *Client) do(method, contentType string, body io.Reader) Response {
 
 // Upload sends a method with one file field plus string fields.
 func (c *Client) Upload(method string, fields map[string]any, fileField, fileName string, data []byte) Response {
+	fields = c.decorate(fields)
 	var buf bytes.Buffer
 	w := multipart.NewWriter(&buf)
 	for k, v := range fields {

@@ -25,6 +25,8 @@ func (a *API) routes() {
 	a.handle("GET /api/v1/emoji/{id}", roleManager, a.emojiPreview)
 	a.handle("GET /api/v1/emoji-pack/{name}", roleManager, a.emojiPack)
 	a.handle("GET /api/v1/emoji-sets", roleManager, a.emojiSets)
+	a.handle("GET /api/v1/button-styles", roleManager, a.getLabelStyles)
+	a.handle("PUT /api/v1/button-styles", roleManager, a.putLabelStyles)
 	a.handle("GET /api/v1/emoji-allow", roleManager, a.getEmojiAllow)
 	a.handle("PUT /api/v1/emoji-allow", roleOwner, a.putEmojiAllow)
 

@@ -21,7 +21,7 @@ import (
 )
 
 // Version is shown on the admin login message ($version in PHP).
-var Version = "6.0.4-go"
+var Version = "6.0.5-go"
 
 type Bot struct {
 	Cfg *config.Config
@@ -30,13 +30,19 @@ type Bot struct {
 	PM  *panels.Manager
 	Log *log.Logger
 
+	labels labelCache // button styles by label (label_styles.go)
+
 	locks sync.Map // per-user mutex: updates of one user run one at a time
 	queue chan *tg.Update
 	wg    sync.WaitGroup
 }
 
 func New(cfg *config.Config, d *db.DB, t *tg.Client, logger *log.Logger) *Bot {
-	return &Bot{Cfg: cfg, DB: d, TG: t, PM: panels.New(d), Log: logger}
+	b := &Bot{Cfg: cfg, DB: d, TG: t, PM: panels.New(d), Log: logger}
+	if t != nil {
+		t.Decorate = b.decorateMarkup
+	}
+	return b
 }
 
 // T is $textbotlang lookup.
