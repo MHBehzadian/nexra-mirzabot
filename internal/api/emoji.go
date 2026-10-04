@@ -122,3 +122,38 @@ func (a *API) putEmojiAllow(w http.ResponseWriter, r *http.Request) {
 	bot.SetEmojiAllowList(a.B.DB, in.IDs, restricted)
 	a.getEmojiAllow(w, r)
 }
+
+// emojiSets maps custom emoji ids (?ids=1,2,…) to the packs they belong to,
+// so a pack can be allowed from just the ids of its emoji.
+func (a *API) emojiSets(w http.ResponseWriter, r *http.Request) {
+	var ids []string
+	seen := map[string]bool{}
+	for _, id := range strings.FieldsFunc(r.URL.Query().Get("ids"), func(c rune) bool { return c == ',' || c == ' ' }) {
+		if emojiID.MatchString(id) && !seen[id] && len(ids) < 200 {
+			seen[id] = true
+			ids = append(ids, id)
+		}
+	}
+	if len(ids) == 0 {
+		fail(w, 400, "give custom emoji ids")
+		return
+	}
+	st, err := a.B.TG.GetCustomEmojiStickers(ids)
+	if err != nil {
+		fail(w, 502, err.Error())
+		return
+	}
+	sets := map[string]string{}
+	for _, s := range st {
+		if s.SetName != "" {
+			sets[s.CustomEmojiID] = s.SetName
+		}
+	}
+	unknown := []string{}
+	for _, id := range ids {
+		if sets[id] == "" {
+			unknown = append(unknown, id)
+		}
+	}
+	ok(w, map[string]any{"sets": sets, "unknown": unknown})
+}

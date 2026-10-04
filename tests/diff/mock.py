@@ -141,7 +141,7 @@ class H(BaseHTTPRequestHandler):
         if m == "getcustomemojistickers":
             ids = params.get("custom_emoji_ids") or []
             return self.send(200, {"ok": True, "result": [
-                {"file_id": "sticker-" + i, "emoji": "⭐", "custom_emoji_id": i, "is_animated": True, "is_video": False,
+                {"file_id": "sticker-" + i, "emoji": "⭐", "custom_emoji_id": i, "set_name": "NexraPack", "is_animated": True, "is_video": False,
                  "thumbnail": {"file_id": "thumb-" + i}} for i in ids if not i.startswith("404")]})
         if m == "getstickerset":
             if params.get("name") != "NexraPack":

@@ -109,15 +109,35 @@ func (c *Ctx) emojiIDReply() {
 	}
 	var b strings.Builder
 	b.WriteString("🆔 شناسه ایموجی‌ها:\n\n")
+	var ids []string
 	seen := map[string]bool{}
 	for _, e := range ce {
 		if seen[e.CustomEmojiID] {
 			continue
 		}
 		seen[e.CustomEmojiID] = true
+		ids = append(ids, e.CustomEmojiID)
 		b.WriteString(`<tg-emoji emoji-id="` + e.CustomEmojiID + `">⭐️</tg-emoji> <code>` + e.CustomEmojiID + "</code>\n")
 	}
-	b.WriteString("\nاین شناسه را در «دکمه‌ها»ی پنل Nexra یا برای آیکون دکمه استفاده کنید.")
+	// the packs they come from: Nexra Panel allows emoji by pack
+	var packs []string
+	if st, err := c.b.TG.GetCustomEmojiStickers(ids); err == nil {
+		got := map[string]bool{}
+		for _, s := range st {
+			if s.SetName != "" && !got[s.SetName] {
+				got[s.SetName] = true
+				packs = append(packs, s.SetName)
+			}
+		}
+	}
+	if len(packs) > 0 {
+		b.WriteString("\n📦 پک:\n")
+		for _, p := range packs {
+			b.WriteString("https://t.me/addemoji/" + html.EscapeString(p) + "\n")
+		}
+	}
+	b.WriteString("\nبرای مجازکردن در Nexra Panel: ربات ← «پک‌های ایموجی پریمیوم»، لینک پک یا همین پیام را بگذارید و «افزودن» را بزنید. " +
+		"بعد این ایموجی‌ها در «دکمه‌ها» (آیکون دکمه) و در متن‌ها قابل استفاده‌اند.")
 	c.sendHTML(c.fromID, b.String(), kbAdmin())
 	c.step("home")
 }

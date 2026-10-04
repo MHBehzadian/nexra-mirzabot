@@ -407,6 +407,7 @@ type Sticker struct {
 	FileID        string `json:"file_id"`
 	Emoji         string `json:"emoji"`
 	CustomEmojiID string `json:"custom_emoji_id"`
+	SetName       string `json:"set_name"`
 	IsAnimated    bool   `json:"is_animated"`
 	IsVideo       bool   `json:"is_video"`
 	Thumbnail     *struct {
