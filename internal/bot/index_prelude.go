@@ -118,6 +118,7 @@ func (c *Ctx) prelude() bool {
 	}
 	c.loadTexts()
 	c.menuTap()
+	c.keyTap()
 	c.channels = d.Select("channels", "*", "", nil)
 
 	if c.user.S("username") == "none" || c.user.IsNull("username") {

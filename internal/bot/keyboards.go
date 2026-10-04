@@ -3,6 +3,8 @@ package bot
 import (
 	"encoding/json"
 	"strings"
+	"unicode"
+	"unicode/utf16"
 
 	"github.com/MHBehzadian/nexra-mirzabot/internal/db"
 	"github.com/MHBehzadian/nexra-mirzabot/internal/tg"
@@ -92,6 +94,88 @@ func (c *Ctx) menuTap() {
 	}
 	c.b.TG.AnswerCallback(c.callbackQueryID, "", false)
 	c.text, c.textIn, c.datain, c.callbackQueryID = label, label, "", ""
+}
+
+// keyTap maps a keyboard tap whose text is not exactly a button label onto
+// that label. With a premium icon on a button, an emoji taken out of a label,
+// or an invisible character in it, the text Telegram sends can differ from
+// the stored label by emoji, joiners and spaces only, and the tap would
+// otherwise do nothing. Exact matches are left alone.
+func (c *Ctx) keyTap() {
+	if c.text == "" || c.datain != "" || len(c.text) > 200 {
+		return
+	}
+	labels := map[string]string{}
+	for _, k := range MainButtonKeys {
+		labels[k] = c.mainLabel(k)
+	}
+	labels["back_home"] = T("users.backhome")
+	if c.isAdmin {
+		labels["admin"] = T("Admin.commendadmin")
+	}
+	for _, l := range labels {
+		if l == c.text {
+			return
+		}
+	}
+	want := menuKey(withoutCustomEmoji(c.text, c.f.Entities))
+	if want == "" {
+		return
+	}
+	match := ""
+	for _, l := range labels {
+		if l != "" && menuKey(l) == want {
+			if match != "" && match != l {
+				return // ambiguous
+			}
+			match = l
+		}
+	}
+	if match != "" {
+		c.text, c.textIn = match, match
+	}
+}
+
+// menuKey is a label with emoji, joiners, marks and extra spaces removed.
+func menuKey(s string) string {
+	var b strings.Builder
+	space := false
+	for _, r := range s {
+		switch {
+		case unicode.IsSpace(r):
+			space = b.Len() > 0
+			continue
+		case unicode.In(r, unicode.So, unicode.Sk, unicode.Cf, unicode.Mn, unicode.Me, unicode.Co, unicode.Cs) ||
+			r == 0xFE0F || r == 0x200D || r == 0x200C:
+			continue
+		}
+		if space {
+			b.WriteByte(' ')
+			space = false
+		}
+		b.WriteRune(r)
+	}
+	return b.String()
+}
+
+// withoutCustomEmoji drops the custom emoji ranges from text.
+func withoutCustomEmoji(text string, ents []tg.Entity) string {
+	ce := customEmojis(ents)
+	if len(ce) == 0 {
+		return text
+	}
+	u := utf16.Encode([]rune(text))
+	var out []uint16
+	pos := 0
+	for _, e := range ce {
+		if e.Offset < pos || e.Offset+e.Length > len(u) {
+			continue
+		}
+		out = append(out, u[pos:e.Offset]...)
+		pos = e.Offset + e.Length
+	}
+	out = append(out, u[pos:]...)
+	return string(utf16.Decode(out))
 }
 
 // dropReplyKeyboard clears the keyboard under the text field (left from the
