@@ -85,6 +85,18 @@ python3 api_smoke.py                   # API مدیریت
 python3 panel_e2e.py                   # بخش Bot در Nexra Panel
 ```
 
+### نسخه‌ی آزمایشی (قبل از ادغام در main)
+
+در GitHub: **Actions → Release → Run workflow**، شاخه را انتخاب کنید و یک تگ مثل `v6.0.0-beta.1` بدهید. یک pre-release با فایل‌های
+اجرایی و اپ اندروید ساخته می‌شود. نصب یا انتقال با همان نسخه:
+
+```bash
+curl -sLo install.sh https://raw.githubusercontent.com/MHBehzadian/nexra-mirzabot/claude/festive-keller-mmew1s/install.sh
+N=7 RELEASE=v6.0.0-beta.1 bash install.sh migrate
+```
+
+دکمه‌ی «گرفتن آخرین نسخه از GitHub» در Nexra Panel هم pre-release را برمی‌دارد.
+
 با هر تگ `v*` (مثلاً `v6.0.0`)، GitHub Actions فایل‌های اجرایی لینوکس (amd64/arm64) و اپ اندروید تأیید خودکار را می‌سازد و در Release
 می‌گذارد؛ `install.sh` و دکمه‌ی «گرفتن آخرین نسخه از GitHub» در Nexra Panel از همان‌جا برمی‌دارند.
 
