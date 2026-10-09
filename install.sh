@@ -381,12 +381,20 @@ register_all() {
 # mirza_dirs: every MirzaBot (PHP) install on this server, whatever its folder
 # is called — a config.php with the bot token and the admin id in it
 mirza_dirs() {
-    local f
+    local f d tok go_tokens
+    # tokens of the bots already on Go: a PHP folder with one of them is a copy
+    go_tokens=$(sed -n 's/^BOT_TOKEN=//p' "$ETC"/bot*.env 2>/dev/null | tr -d '"') || true
     for f in /var/www/html/*/config.php /var/www/html/*/*/config.php /var/www/*/config.php; do
         [ -f "$f" ] || continue
         grep -q '^\$APIKEY *=' "$f" && grep -q '^\$adminnumber *=' "$f" || continue
         grep -q '{BOT_TOKEN}' "$f" && continue # an unfilled template
-        dirname "$f"
+        d=$(dirname "$f")
+        case "${d##*/}" in *backup* | *_bak* | *.bak | *_old* | *.old) continue ;; esac # a backup copy
+        if ! grep -qx "LEGACY_PHP_DIR=$d" "$ETC"/bot*.env 2>/dev/null; then
+            tok=$(sed -n 's/^\$APIKEY *= *["'\'']\([^"'\'']*\).*/\1/p' "$f" | head -1)
+            [ -n "$tok" ] && grep -qxF "$tok" <<< "$go_tokens" && continue # a copy of a bot already on Go
+        fi
+        echo "$d"
     done | sort -u
 }
 
