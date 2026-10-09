@@ -23,7 +23,10 @@
 #   PHP bot to Go and connect each to the panel under its owner:
 #     bash /root/nexrabot-install.sh all
 #
-#   Move EVERY PHP bot on this server (/var/www/html/botmirzapanel*) to Go,
+#   See every bot on this server, its state and whether it is in Nexra Panel:
+#     bash install.sh status
+#
+#   Move EVERY PHP bot on this server (any folder under /var/www) to Go,
 #   one by one, and connect each to Nexra Panel under its owner:
 #     curl -sLo /root/nexrabot-install.sh <raw url of this file>
 #     NEXRA_PANEL_URL=https://panel.example.com/dashboard NEXRA_PANEL_USER=admin \
@@ -375,32 +378,66 @@ register_all() {
     done
 }
 
+# mirza_dirs: every MirzaBot (PHP) install on this server, whatever its folder
+# is called — a config.php with the bot token and the admin id in it
+mirza_dirs() {
+    local f
+    for f in /var/www/html/*/config.php /var/www/html/*/*/config.php /var/www/*/config.php; do
+        [ -f "$f" ] || continue
+        grep -q '^\$APIKEY *=' "$f" && grep -q '^\$adminnumber *=' "$f" || continue
+        grep -q '{BOT_TOKEN}' "$f" && continue # an unfilled template
+        dirname "$f"
+    done | sort -u
+}
+
+# bot_for_dir DIR: the Go bot number whose config came from DIR, if any
+bot_for_dir() {
+    local f n
+    f=$(grep -lx "LEGACY_PHP_DIR=$1" "$ETC"/bot*.env 2>/dev/null | head -1)
+    [ -n "$f" ] || return 1
+    n=${f##*/bot}; echo "${n%.env}"
+}
+
+free_bot_number() { # the smallest number with no config, unit or port
+    local n=1
+    while [ -e "$ETC/bot$n.env" ] || systemctl is-active --quiet "nexrabot@$n" ||
+        ss -ltn 2>/dev/null | grep -q ":$(port_for "$n") "; do
+        n=$((n + 1))
+    done
+    echo "$n"
+}
+
 cmd_migrate_all() {
-    local self ok=() failed=() skipped=() dir n
+    local self ok=() failed=() skipped=() dir n base
     self=$(readlink -f "$0")
     [ -f "$self" ] || die "save this script to a file first (curl -sLo /root/nexrabot-install.sh …) and run that file"
     install_binary
     install_unit
     panel_env
     export NEXRABOT_BIN="$BIN" # every bot below uses the binary just installed
-    for dir in /var/www/html/botmirzapanel*/; do
-        n=${dir%/}; n=${n##*botmirzapanel}
-        case "$n" in ''|*[!0-9]*) continue ;; esac
-        [ -f "$dir/config.php" ] || continue
-        if systemctl is-active --quiet "nexrabot@$n"; then
-            say "bot $n already runs on Go"
+    for dir in $(mirza_dirs); do
+        n=$(bot_for_dir "$dir") || n=""
+        if [ -n "$n" ] && systemctl is-active --quiet "nexrabot@$n"; then
+            say "bot $n ($dir) already runs on Go"
             skipped+=("$n")
             continue
         fi
+        if [ -z "$n" ]; then
+            base=${dir##*/}; n=${base#botmirzapanel}
+            case "$base" in botmirzapanel*) ;; *) n="" ;; esac
+            case "$n" in ''|*[!0-9]*) n=$(free_bot_number) ;; esac
+            [ -e "$ETC/bot$n.env" ] && n=$(free_bot_number)
+        fi
         echo
-        say "======== bot $n ========"
+        say "======== bot $n ($dir) ========"
         set +e
-        NEXRABOT_DEFER_REGISTER=1 N="$n" PHP_DIR="${dir%/}" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
+        NEXRABOT_DEFER_REGISTER=1 N="$n" PHP_DIR="$dir" bash "$self" migrate 2>&1 | tee "$BACKUPS/migrate-bot$n.log"
         local rc=${PIPESTATUS[0]}
         set -e
-        if [ "$rc" = 0 ]; then ok+=("$n"); else failed+=("$n"); fi
+        if [ "$rc" = 0 ]; then ok+=("$n"); else failed+=("$n ($dir)"); fi
     done
-    register_all "${ok[@]}" "${skipped[@]}"
+    # every Go bot here goes into the panel, also the ones made with "new"
+    register_all $(running_bots)
     echo
     echo "=========================================="
     echo "moved to Go:        ${ok[*]:-—}"
@@ -409,6 +446,61 @@ cmd_migrate_all() {
     [ ${#failed[@]} -gt 0 ] && echo "logs:               $BACKUPS/migrate-bot<N>.log"
     echo "=========================================="
     [ ${#failed[@]} -eq 0 ]
+}
+
+# ----------------------------------------------------------------- status
+
+json_get() { # PYTHON-EXPRESSION — reads JSON on stdin as d, prints the expression (empty on any error)
+    command -v python3 >/dev/null || return 0
+    python3 -c "import json,sys
+try:
+    d=json.load(sys.stdin); v=$1
+    print('\n'.join(v) if isinstance(v,list) else v)
+except Exception: pass" 2>/dev/null
+}
+
+tg_name() { # TOKEN [API] — the bot's name in Telegram
+    [ -n "$1" ] || return 0
+    { curl -s -m 10 "${2:-https://api.telegram.org}/bot$1/getMe" | json_get 'd["result"]["first_name"]'; } || true
+}
+
+panel_urls() { # the bot addresses Nexra Panel has, one per line ("?" if the login fails)
+    [ -n "${NEXRA_PANEL_URL:-}" ] || return 0
+    local k=() tok
+    [ "${NEXRA_PANEL_INSECURE:-}" = 1 ] && k=(-k)
+    tok=$(curl -s "${k[@]}" -m 15 -X POST --data-urlencode "username=$NEXRA_PANEL_USER" --data-urlencode "password=$NEXRA_PANEL_PASS" \
+        "$NEXRA_PANEL_URL/login" | json_get 'd["data"]["access_token"]') || true
+    [ -n "$tok" ] || { echo "?"; return 0; }
+    { curl -s "${k[@]}" -m 15 -H "Authorization: Bearer $tok" "$NEXRA_PANEL_URL/sales-bots" | json_get '[b["url"].rstrip("/") for b in d["data"]]'; } || true
+}
+
+cmd_status() {
+    panel_env >/dev/null 2>&1 || true
+    local urls f n dom user state inpanel name token dir
+    urls=$(panel_urls)
+    echo
+    for f in "$ETC"/bot*.env; do
+        [ -f "$f" ] || continue
+        n=${f##*/bot}; n=${n%.env}
+        case "$n" in ''|*[!0-9]*) continue ;; esac
+        dom=$(sed -n 's/^DOMAIN=//p' "$f"); user=$(sed -n 's/^BOT_USERNAME=//p' "$f")
+        token=$(sed -n 's/^BOT_TOKEN=//p' "$f" | tr -d '"')
+        state="Go, stopped"; systemctl is-active --quiet "nexrabot@$n" && state="Go, running"
+        inpanel="no panel here"
+        if [ "$urls" = "?" ]; then inpanel="panel login failed"
+        elif [ -n "$urls" ]; then grep -qx "https://$dom" <<< "$urls" && inpanel="yes" || inpanel="NO"; fi
+        name=$(tg_name "$token" "$(sed -n 's/^TELEGRAM_API=//p' "$f")")
+        printf '  bot %-3s %s (@%s)  https://%s  [%s]  in Nexra Panel: %s\n' "$n" "${name:-?}" "$user" "$dom" "$state" "$inpanel"
+    done
+    for dir in $(mirza_dirs); do
+        bot_for_dir "$dir" >/dev/null && systemctl is-active --quiet "nexrabot@$(bot_for_dir "$dir")" && continue
+        token=$(sed -n 's/^\$APIKEY *= *["'\'']\([^"'\'']*\).*/\1/p' "$dir/config.php" | head -1)
+        dom=$(sed -n 's/^\$domainhosts *= *["'\'']\([^"'\'']*\).*/\1/p' "$dir/config.php" | head -1)
+        name=$(tg_name "$token")
+        printf '  PHP     %s  https://%s  [still PHP: %s]\n' "${name:-?}" "$dom" "$dir"
+    done
+    echo
+    echo "To move every PHP bot and put every bot into Nexra Panel:  bash $0 migrate-all"
 }
 
 # ----------------------------------------------------------------- new bot
@@ -669,6 +761,7 @@ case "${1:-new}" in
     migrate-all) cmd_migrate_all ;;
     panel-update) cmd_panel_update ;;
     panel-link) cmd_panel_link ;;
+    status) cmd_status ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|register|panel-update|panel-link|rollback|update|keys]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|panel-update|panel-link|rollback|update|keys]" ;;
 esac
