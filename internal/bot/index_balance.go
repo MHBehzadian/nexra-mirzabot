@@ -178,7 +178,10 @@ func (c *Ctx) secPayConfirm() bool {
 		default:
 			c.alert(T("users.Balance.Failed"))
 		}
-	} else if c.stepIs("cart_to_cart_user") {
+	} else if c.stepIs("cart_to_cart_user") && c.datain == "" {
+		// only a message is a receipt: a tapped button (an admin confirming
+		// someone else's payment, or the user picking another option) goes
+		// on to its own handler instead of "the receipt must be a photo"
 		if !c.photo {
 			c.sendHTML(c.fromID, T("users.Balance.Invalid-receipt"), nil)
 			return true
