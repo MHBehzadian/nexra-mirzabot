@@ -2,9 +2,10 @@
 # =============================================================================
 # Nexra bot (nexrabot, the Go rewrite of the Mirza bot) — install / migrate
 #
-#   New bot (same variables as the old PHP installer):
-#     N=7 TOKEN='123:abc' DOMAIN='bot7.example.com' ADMIN='123456789' \
-#     NEXRA_SECRET='secret' CERT_EMAIL='you@example.com' bash install.sh
+#   New bot (same variables as the old PHP installer; EXTRA_ADMINS adds more
+#   admins, e.g. the seller, whose panel account then gets the bot):
+#     N=$(bash install.sh free-number) TOKEN='123:abc' DOMAIN='bot7.example.com' ADMIN='123456789' \
+#     NEXRA_SECRET='secret' CERT_EMAIL='you@example.com' EXTRA_ADMINS='987654321' bash install.sh
 #
 #   Move a running PHP bot to Go (same database, same webhook, no downtime):
 #     N=7 bash install.sh migrate          # PHP_DIR=/var/www/html/botmirzapanel7 by default
@@ -406,6 +407,24 @@ bot_for_dir() {
     n=${f##*/bot}; echo "${n%.env}"
 }
 
+# next_bot_number: one past the highest bot number in use anywhere here
+# (Go configs, PHP folders, databases, nginx sites), for a new bot
+cmd_free_number() {
+    local max=0 n x
+    for x in "$ETC"/bot*.env /var/www/html/botmirzapanel*/ /etc/nginx/sites-available/bot*; do
+        n=${x%/}; n=${n##*/}; n=${n%.env}; n=${n#botmirzapanel}; n=${n#bot}
+        case "$n" in '' | *[!0-9]*) continue ;; esac
+        [ "$n" -gt "$max" ] && max=$n
+    done
+    for n in $(mysql -N -e "SHOW DATABASES LIKE 'mirzabot%'" 2>/dev/null | sed 's/^mirzabot//'); do
+        case "$n" in '' | *[!0-9]*) continue ;; esac
+        [ "$n" -gt "$max" ] && max=$n
+    done
+    n=$((max + 1))
+    while ss -ltn 2>/dev/null | grep -q ":$(port_for "$n") "; do n=$((n + 1)); done
+    echo "$n"
+}
+
 free_bot_number() { # the smallest number with no config, unit or port
     local n=1
     while [ -e "$ETC/bot$n.env" ] || systemctl is-active --quiet "nexrabot@$n" ||
@@ -522,12 +541,20 @@ cmd_new() {
     CERT_EMAIL="${CERT_EMAIL:?set CERT_EMAIL= (email for the SSL certificate)}"
     DBPASS="${DBPASS:-$(openssl rand -hex 12)}"
     BACKUP_MINUTE="${BACKUP_MINUTE:-$((RANDOM % 60))}"
+    EXTRA_ADMINS="${EXTRA_ADMINS:-}"
     local DBNAME="mirzabot${N}" DBUSER="mirza${N}user" CFG="$ETC/bot${N}.env" PORT
     PORT=$(port_for "$N")
 
     [ -e "$CFG" ] && die "$CFG already exists; bot $N is installed"
     getent hosts "$DOMAIN" >/dev/null || die "DNS for $DOMAIN is not set yet; point the A record here first"
     for t in nginx certbot mysql; do command -v "$t" >/dev/null || die "$t is not installed"; done
+    # never build on top of something another bot already uses
+    [ -n "$(mysql -N -e "SHOW DATABASES LIKE '$DBNAME'")" ] && die "database $DBNAME already exists; pick another N (bash $0 free-number)"
+    [ -n "$(mysql -N -e "SELECT 1 FROM mysql.user WHERE User='$DBUSER'")" ] && die "database user $DBUSER already exists; pick another N"
+    [ -e "/etc/nginx/sites-available/bot${N}" ] && die "/etc/nginx/sites-available/bot${N} already exists; pick another N"
+    [ -d "/var/www/html/botmirzapanel${N}" ] && [ -f "/var/www/html/botmirzapanel${N}/config.php" ] && die "a PHP bot ${N} exists; pick another N"
+    grep -qx "DOMAIN=$DOMAIN" "$ETC"/bot*.env 2>/dev/null && die "another bot already uses $DOMAIN"
+    ss -ltn 2>/dev/null | grep -q ":$PORT " && die "port $PORT is already in use; pick another N"
 
     install_binary
     install_unit
@@ -552,6 +579,13 @@ EOF
     secure_config "$CFG"
     "$BIN" schema -c "$CFG" >/dev/null
     "$BIN" check -c "$CFG"
+    # more admins (the seller): the bot goes to the panel admin with one of these Telegram ids
+    local a
+    for a in ${EXTRA_ADMINS//,/ }; do
+        case "$a" in '' | *[!0-9]*) warn "skipping admin id '$a' (not a number)"; continue ;; esac
+        mysql "$DBNAME" -e "INSERT IGNORE INTO admin (id_admin) VALUES ('$a')"
+        say "admin $a added"
+    done
 
     say "starting nexrabot@$N"
     systemctl enable --now "nexrabot@$N"
@@ -770,6 +804,7 @@ case "${1:-new}" in
     panel-update) cmd_panel_update ;;
     panel-link) cmd_panel_link ;;
     status) cmd_status ;;
+    free-number) cmd_free_number ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|panel-update|panel-link|rollback|update|keys]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|free-number|panel-update|panel-link|rollback|update|keys]" ;;
 esac
