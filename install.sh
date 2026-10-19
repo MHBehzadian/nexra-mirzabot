@@ -24,6 +24,9 @@
 #   PHP bot to Go and connect each to the panel under its owner:
 #     bash /root/nexrabot-install.sh all
 #
+#   Move a bot (users, services, settings) onto another Telegram bot:
+#     bash install.sh change-token <bot username> <new token>
+#
 #   See every bot on this server, its state and whether it is in Nexra Panel:
 #     bash install.sh status
 #
@@ -475,6 +478,42 @@ cmd_migrate_all() {
     [ ${#failed[@]} -eq 0 ]
 }
 
+# ----------------------------------------------------------------- change token
+
+# change-token USERNAME NEW_TOKEN: the same bot (users, services, products,
+# settings) moves to another Telegram bot by swapping its token
+cmd_change_token() {
+    local old_user="${1#@}" new="${2:-}" f n old new_user tg="${NEXRABOT_TELEGRAM_API:-https://api.telegram.org}"
+    [ -n "$old_user" ] && [ -n "$new" ] || die "usage: bash $0 change-token <bot username> <new token>"
+    [[ "$new" =~ ^[0-9]{6,12}:[A-Za-z0-9_-]{30,45}$ ]] || die "that does not look like a bot token; nothing was changed"
+    f=$(grep -lix "BOT_USERNAME=$old_user" "$ETC"/bot*.env 2>/dev/null | head -1) || true
+    [ -n "$f" ] || die "no Go bot @$old_user on this server (see: bash $0 status)"
+    n=${f##*/bot}; n=${n%.env}
+    old=$(sed -n 's/^BOT_TOKEN=//p' "$f" | tr -d '"')
+    say "@$old_user is bot $n ($f)"
+    new_user=$(curl -s -m 20 "$tg/bot$new/getMe" | json_get 'd["result"]["username"]') || true
+    [ -n "$new_user" ] || die "the new token is not valid (getMe failed); nothing was changed"
+    [ "$new" = "$old" ] && die "that is already this bot's token"
+    grep -qx "BOT_TOKEN=$new" "$ETC"/bot*.env && die "another bot here already uses the new token"
+    say "new bot: @$new_user"
+    mkdir -p "$BACKUPS"; chmod 700 "$BACKUPS"
+    cp -p "$f" "$BACKUPS/bot$n.env.before-token-$(date +%Y%m%d_%H%M%S)"
+    # the old bot must stop sending here, or its users would get answers from the new one
+    curl -s -m 20 "$tg/bot$old/deleteWebhook" >/dev/null || true
+    say "old bot @$old_user no longer sends its updates here"
+    sed -i "s|^BOT_TOKEN=.*|BOT_TOKEN=$new|; s|^BOT_USERNAME=.*|BOT_USERNAME=$new_user|" "$f"
+    secure_config "$f"
+    [ -f "/root/bot${n}_backup.sh" ] && sed -i "s|$old|$new|g" "/root/bot${n}_backup.sh"
+    systemctl restart "nexrabot@$n"
+    wait_healthy "http://127.0.0.1:$(port_for "$n")/healthz" 30 || die "nexrabot@$n did not start; see: journalctl -u nexrabot@$n -n 50"
+    "$BIN" check -c "$f"
+    "$BIN" set-webhook -c "$f"
+    register_with_panel "$n" || true
+    echo
+    echo "done: bot $n now runs as @$new_user (same users, services and settings)"
+    echo "backup of the old settings: $BACKUPS/bot$n.env.before-token-*"
+}
+
 # ----------------------------------------------------------------- status
 
 json_get() { # PYTHON-EXPRESSION — reads JSON on stdin as d, prints the expression (empty on any error)
@@ -805,6 +844,7 @@ case "${1:-new}" in
     panel-link) cmd_panel_link ;;
     status) cmd_status ;;
     free-number) cmd_free_number ;;
+    change-token) cmd_change_token "${2:-}" "${3:-}" ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|free-number|panel-update|panel-link|rollback|update|keys]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|free-number|change-token|panel-update|panel-link|rollback|update|keys]" ;;
 esac
