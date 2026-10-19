@@ -514,6 +514,62 @@ cmd_change_token() {
     echo "backup of the old settings: $BACKUPS/bot$n.env.before-token-*"
 }
 
+# ----------------------------------------------------------------- reset
+
+# reset <bot username> DELETE-ALL-DATA — the bot starts over with an empty
+# database (a full backup is kept). TOKEN= moves it to another Telegram bot
+# too, ADMIN= sets the main admin, EXTRA_ADMINS= adds more (the seller).
+cmd_reset() {
+    local user="${1#@}" confirm="${2:-}" f n db other tables ts
+    [ -n "$user" ] || die "usage: TOKEN=… ADMIN=… EXTRA_ADMINS=… bash $0 reset <bot username> DELETE-ALL-DATA"
+    [ "$confirm" = "DELETE-ALL-DATA" ] || die "this deletes every user, service and payment of @$user; add DELETE-ALL-DATA to confirm"
+    f=$(grep -lix "BOT_USERNAME=$user" "$ETC"/bot*.env 2>/dev/null | head -1) || true
+    [ -n "$f" ] || die "no Go bot @$user on this server (see: bash $0 status)"
+    n=${f##*/bot}; n=${n%.env}
+    db=$(sed -n 's/^DB_NAME=//p' "$f" | tr -d '"')
+    [ -n "$db" ] || die "no DB_NAME in $f"
+    for other in "$ETC"/bot*.env; do
+        [ "$other" = "$f" ] && continue
+        grep -qx "DB_NAME=$db" "$other" && die "$db is also the database of $other; not touching it"
+    done
+    case "${ADMIN:-}" in '' | *[!0-9]*) [ -z "${ADMIN:-}" ] || die "ADMIN must be a numeric Telegram id" ;; esac
+
+    ts=$(date +%Y%m%d_%H%M%S)
+    mkdir -p "$BACKUPS"; chmod 700 "$BACKUPS"
+    say "backing up everything of bot $n first"
+    "$BIN" db-dump -c "$f" --out "$BACKUPS/bot$n-before-reset-$ts.sql.gz"
+    cp -p "$f" "$BACKUPS/bot$n.env.before-reset-$ts"
+
+    if [ -n "${TOKEN:-}" ]; then
+        NEXRABOT_DEFER_REGISTER=1 cmd_change_token "$user" "$TOKEN"
+    fi
+
+    say "emptying database $db"
+    systemctl stop "nexrabot@$n"
+    tables=$(mysql -N -e "SELECT table_name FROM information_schema.tables WHERE table_schema='$db'")
+    { echo "SET FOREIGN_KEY_CHECKS=0;"; for t in $tables; do echo "DROP TABLE \`$db\`.\`$t\`;"; done; } | mysql
+    if [ -n "${ADMIN:-}" ]; then
+        sed -i "s|^ADMIN_ID=.*|ADMIN_ID=$ADMIN|" "$f"
+        secure_config "$f"
+    fi
+    "$BIN" schema -c "$f" >/dev/null
+    local a
+    for a in ${EXTRA_ADMINS//,/ }; do
+        case "$a" in '' | *[!0-9]*) warn "skipping admin id '$a' (not a number)"; continue ;; esac
+        mysql "$db" -e "INSERT IGNORE INTO admin (id_admin) VALUES ('$a')"
+        say "admin $a added"
+    done
+
+    systemctl start "nexrabot@$n"
+    wait_healthy "http://127.0.0.1:$(port_for "$n")/healthz" 30 || die "nexrabot@$n did not start; see: journalctl -u nexrabot@$n -n 50"
+    "$BIN" check -c "$f"
+    "$BIN" set-webhook -c "$f"
+    register_with_panel "$n" || true
+    echo
+    echo "done: bot $n starts over as @$(sed -n 's/^BOT_USERNAME=//p' "$f") with an empty database"
+    echo "the old data is in $BACKUPS/bot$n-before-reset-$ts.sql.gz"
+}
+
 # ----------------------------------------------------------------- status
 
 json_get() { # PYTHON-EXPRESSION — reads JSON on stdin as d, prints the expression (empty on any error)
@@ -845,6 +901,7 @@ case "${1:-new}" in
     status) cmd_status ;;
     free-number) cmd_free_number ;;
     change-token) cmd_change_token "${2:-}" "${3:-}" ;;
+    reset) cmd_reset "${2:-}" "${3:-}" ;;
     all) cmd_all ;;
-    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|free-number|change-token|panel-update|panel-link|rollback|update|keys]" ;;
+    *) die "usage: install.sh [all|new|migrate|migrate-all|register|status|free-number|change-token|reset|panel-update|panel-link|rollback|update|keys]" ;;
 esac
