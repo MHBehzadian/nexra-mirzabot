@@ -219,7 +219,8 @@ def autopay(r):
     r.step("autopay on", cb(A, "autopay_toggle"))
     r.step("wallet", msg(U1, r_text(r, "text_Add_Balance"), username="ali"))
     r.step("amount", msg(U1, "200000", username="ali"))
-    r.step("card (reserved amount)", cb(U1, "cart_to_offline", username="ali"))
+    r.step("card (reserved amount)", cb(U1, "cart_to_offline", username="ali"),
+           expect_diff="with SMS confirmation the card text no longer also asks for a receipt photo")
 
     cache = {}
 

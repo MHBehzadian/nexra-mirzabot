@@ -129,7 +129,12 @@ func (c *Ctx) cardToCard() {
 		}
 	}
 	waiting := note != ""
-	msg := sprintf("users.moeny.carttext", nf(float64(amount)), card) + note
+	// checked by SMS: the text must not ask for a receipt photo as well
+	text := "users.moeny.carttext"
+	if waiting {
+		text = "users.moeny.carttext_auto"
+	}
+	msg := sprintf(text, nf(float64(amount)), card) + note
 	digits := re(`\d+`).FindAllString(card, -1)
 	if len(digits) > 0 && php.Intval(c.setting.S("copy_cart")) == 1 {
 		k := ik(
