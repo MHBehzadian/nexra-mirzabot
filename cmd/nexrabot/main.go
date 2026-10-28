@@ -541,6 +541,8 @@ func cmdPanelRegister(args []string) {
 	out, err := call("POST", "/sales-bots/register", map[string]any{
 		"url": cfg.PublicURL, "owner_key": cfg.APIOwnerKey, "manager_key": cfg.APIManagerKey,
 		"ignore_ids": ignoreIDs,
+		// the bot started over (install.sh reset): pick its owner again
+		"reassign": os.Getenv("NEXRA_PANEL_REASSIGN") == "1",
 	})
 	if err != nil {
 		die("panel refused the bot: %v", err)

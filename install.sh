@@ -45,7 +45,7 @@
 #     bash install.sh panel-update
 #
 # Optional: NEXRABOT_BIN=/path/to/nexrabot uses a local binary instead of
-# downloading the latest release; RELEASE=v6.0.7 pins a release.
+# downloading the latest release; RELEASE=v6.0.8 pins a release.
 # =============================================================================
 set -Eeuo pipefail
 
@@ -534,6 +534,7 @@ cmd_reset() {
     done
     case "${ADMIN:-}" in '' | *[!0-9]*) [ -z "${ADMIN:-}" ] || die "ADMIN must be a numeric Telegram id" ;; esac
 
+    install_binary
     ts=$(date +%Y%m%d_%H%M%S)
     mkdir -p "$BACKUPS"; chmod 700 "$BACKUPS"
     say "backing up everything of bot $n first"
@@ -564,7 +565,10 @@ cmd_reset() {
     wait_healthy "http://127.0.0.1:$(port_for "$n")/healthz" 30 || die "nexrabot@$n did not start; see: journalctl -u nexrabot@$n -n 50"
     "$BIN" check -c "$f"
     "$BIN" set-webhook -c "$f"
+    # a bot that starts over gets its owner picked again, not the old one kept
+    export NEXRA_PANEL_REASSIGN=1
     register_with_panel "$n" || true
+    unset NEXRA_PANEL_REASSIGN
     echo
     echo "done: bot $n starts over as @$(sed -n 's/^BOT_USERNAME=//p' "$f") with an empty database"
     echo "the old data is in $BACKUPS/bot$n-before-reset-$ts.sql.gz"
