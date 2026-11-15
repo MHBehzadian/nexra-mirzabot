@@ -27,31 +27,42 @@ func (m *Manager) pgCall(panel db.Row, method, path string, payload []byte) (int
 	return r.code, r.body
 }
 
-// pgGroupID is the id of the bot's group for paid or test users, made on
-// first use with every inbound of the panel (narrow it in PasarGuard later).
-func (m *Manager) pgGroupID(panel db.Row, isTest bool) any {
+// pgGroupID is the group a new user goes into. The bot's own groups
+// (mirza_paid / mirza_test) are used when they exist; an admin allowed to
+// (owner, administrator) makes them on first use with every inbound. A
+// non-sudo admin (operator) can neither list groups in full nor make them,
+// so it reads the short list - which holds only the groups it may use - and
+// takes the bot's group from there, or else the first group it has.
+func (m *Manager) pgGroupID(panel db.Row, isTest bool) (any, string) {
 	want := pgPaidGroup
 	if isTest {
 		want = pgTestGroup
 	}
-	_, body := m.pgCall(panel, "GET", "/api/groups", nil)
-	for _, g := range groupsList(jsonAny(body)) {
+	code, body := m.pgCall(panel, "GET", "/api/groups/simple?all=true", nil)
+	if code != 200 {
+		code, body = m.pgCall(panel, "GET", "/api/groups", nil)
+	}
+	groups := groupsList(jsonAny(body))
+	for _, g := range groups {
 		if n, _ := g["name"].(string); strings.EqualFold(n, want) && g["id"] != nil {
-			return g["id"]
+			return g["id"], ""
 		}
 	}
 	_, ib := m.pgCall(panel, "GET", "/api/inbounds", nil)
-	var tags []string
-	for _, t := range strList(jsonAny(ib)) {
-		tags = append(tags, t)
-	}
+	tags := strList(jsonAny(ib))
 	code, created := m.pgCall(panel, "POST", "/api/group", marshal(map[string]any{"name": want, "inbound_tags": tags}))
-	g := jsonObj(created)
-	if code != 200 && code != 201 || g["id"] == nil {
-		log.Printf("pasarguard %s: create group %s failed: HTTP %d %s", panel.S("name_panel"), want, code, string(created))
-		return nil
+	if g := jsonObj(created); (code == 200 || code == 201) && g["id"] != nil {
+		return g["id"], ""
 	}
-	return g["id"]
+	// not allowed to make groups: use one this admin has
+	for _, g := range groups {
+		if g["id"] != nil {
+			return g["id"], ""
+		}
+	}
+	log.Printf("pasarguard %s: no group for bot users (create %s: HTTP %d %s)", panel.S("name_panel"), want, code, string(created))
+	return nil, "PasarGuard: this admin has no group to put users in and may not create one; " +
+		"make the groups mirza_paid and mirza_test (or any group) with a sudo admin and give this admin access to them"
 }
 
 // pgUnix turns a PasarGuard datetime ("2026-01-02T03:04:05Z", with or without
@@ -99,9 +110,9 @@ func pgError(body map[string]any) any {
 }
 
 func (m *Manager) pgCreate(panel db.Row, username string, expire int64, dataLimit float64, isTest bool) Out {
-	gid := m.pgGroupID(panel, isTest)
+	gid, why := m.pgGroupID(panel, isTest)
 	if gid == nil {
-		return unsuccessful("PasarGuard: could not find or create the group for bot users")
+		return unsuccessful(why)
 	}
 	data := map[string]any{
 		"username":   username,
