@@ -432,6 +432,17 @@ func optSUI() *tg.ReplyKeyboard {
 		row(mp("keyboardpanel.editpassword")), row(mp("methodusername")),
 		row(mp("sublinkstatus"), mp("configstatus")), backAdminRow())
 }
+
+// optPasarguard is optMarzban without the inbound setting: a PasarGuard
+// user's inbounds come from its group (mirza_paid / mirza_test).
+func optPasarguard() *tg.ReplyKeyboard {
+	return rk(row(mp("btnshowconnect"), mp("showpanelbtn")), row(mp("showpaneltestbtn")),
+		row(mp("keyboardpanel.namepanel"), mp("keyboardpanel.removepanel")),
+		row(mp("keyboardpanel.editurl"), mp("keyboardpanel.editusername")),
+		row(mp("keyboardpanel.editpassword")), row(mp("methodusername")),
+		row(mp("sublinkstatus"), mp("configstatus")), row(mp("keyboardpanel.on_hold_status")), backAdminRow())
+}
+
 func optMarzneshin() *tg.ReplyKeyboard {
 	return rk(row(mp("btnshowconnect"), mp("showpanelbtn")), row(mp("showpaneltestbtn")),
 		row(mp("keyboardpanel.namepanel"), mp("keyboardpanel.removepanel")),
@@ -466,7 +477,7 @@ func kbTypePanel() *tg.InlineKeyboard {
 		row(cb(t("marzneshin"), "typepanel%marzneshin"), cb(t("alireza"), "typepanel%alireza")),
 		row(cb(t("s-ui"), "typepanel%s_ui"), cb(t("wgdashboard"), "typepanel%wgdashboard")),
 		row(cb(t("mikrotik"), "typepanel%mikrotik")),
-		row(cb(t("nexra"), "typepanel%nexra")),
+		row(cb(t("pasarguard"), "typepanel%pasarguard"), cb(t("nexra"), "typepanel%nexra")),
 		row(cb(T("Admin.Back-Adminment"), "back_admin")))
 }
 
@@ -543,6 +554,8 @@ func (c *Ctx) outTypePanel(typ, msg string) {
 		k = optMikrotik()
 	case "nexra":
 		k = optNexra()
+	case "pasarguard":
+		k = optPasarguard()
 	default:
 		return
 	}

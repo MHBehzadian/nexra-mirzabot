@@ -192,6 +192,19 @@ func (c *Ctx) showConnect() {
 		} else {
 			c.sendHTML(c.fromID, T("Admin.managepanel.errorstatuspanel")+jsonStr(tok), nil)
 		}
+	case "pasarguard":
+		tok := pm.MarzbanToken(panel)
+		if _, ok := tok["access_token"]; ok {
+			o := jmap(pm.PasarGuardStats(panel))
+			msg := sprintf("Admin.managepanel.infopasarguard", o.s("total_user"), o.s("active_users"), o.s("online_users"), o.s("version"),
+				formatBytes(php.Floatval(o.s("mem_total"))), formatBytes(php.Floatval(o.s("mem_used"))),
+				formatBytes(php.Floatval(o.s("outgoing_bandwidth"))+php.Floatval(o.s("incoming_bandwidth"))))
+			c.sendHTML(c.fromID, msg, nil)
+		} else if jmap(tok).s("detail") == "Incorrect username or password" {
+			c.sendHTML(c.fromID, T("Admin.managepanel.Incorrectinfo"), nil)
+		} else {
+			c.sendHTML(c.fromID, T("Admin.managepanel.errorstatuspanel")+jsonStr(tok), nil)
+		}
 	case "nexra":
 		dash := pm.NexraDashboard(panel)
 		if d, ok := dash["detail"]; ok {
@@ -343,6 +356,8 @@ func (c *Ctx) admPanelAdd() bool {
 			c.sendHTML(c.fromID, T("Admin.managepanel.notex-ui"), nil)
 		case "marzban", "s_ui", "marzneshin":
 			c.sendHTML(c.fromID, T("Admin.managepanel.notemarzban"), nil)
+		case "pasarguard":
+			c.sendHTML(c.fromID, T("Admin.managepanel.notepasarguard"), nil)
 		case "nexra":
 			c.sendHTML(c.fromID, T("Admin.managepanel.notenexra"), nil)
 		case "wgdashboard":

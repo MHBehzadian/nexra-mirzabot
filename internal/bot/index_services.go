@@ -203,7 +203,7 @@ func renewConfig(panelType, inboundID string, product db.Row) (map[string]any, b
 	}
 	dataLimit := float64(php.Intval(product.S("Volume_constraint"))) * math.Pow(1024, 3)
 	switch panelType {
-	case "marzban", "nexra":
+	case "marzban", "nexra", "pasarguard":
 		return map[string]any{"expire": newDate, "data_limit": int64(dataLimit)}, true
 	case "marzneshin":
 		return map[string]any{"expire_date": newDate, "data_limit": int64(dataLimit)}, true
@@ -492,7 +492,7 @@ func (c *Ctx) confirmExtraVolume(volumeS string) bool {
 	dataLimit := out.F("data_limit") + volume*gib
 	var cfg map[string]any
 	switch panel.S("type") {
-	case "marzban", "nexra", "marzneshin":
+	case "marzban", "nexra", "marzneshin", "pasarguard":
 		cfg = map[string]any{"data_limit": jsonNum(dataLimit)}
 	case "x-ui_single", "alireza":
 		s, _ := json.Marshal(map[string]any{"clients": []any{map[string]any{"totalGB": jsonNum(dataLimit)}}})

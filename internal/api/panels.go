@@ -8,7 +8,7 @@ import (
 	"github.com/MHBehzadian/nexra-mirzabot/internal/php"
 )
 
-var panelTypes = map[string]bool{"marzban": true, "x-ui_single": true, "marzneshin": true, "alireza": true, "s_ui": true, "wgdashboard": true, "mikrotik": true, "nexra": true}
+var panelTypes = map[string]bool{"marzban": true, "x-ui_single": true, "marzneshin": true, "alireza": true, "s_ui": true, "wgdashboard": true, "mikrotik": true, "nexra": true, "pasarguard": true}
 
 func panelPublic(r db.Row, owner bool) map[string]any {
 	m := rowMap(r, "id", "name_panel", "type", "status", "statusTest", "sublink", "configManual", "onholdstatus", "MethodUsername")
@@ -193,6 +193,14 @@ func (a *API) testPanel(w http.ResponseWriter, r *http.Request) {
 		tok := pm.MarzbanToken(p)
 		if _, okT := tok["access_token"]; okT {
 			st := pm.MarzbanSystemStats(p)
+			res["ok"], res["version"], res["users"] = true, st["version"], st["total_user"]
+		} else {
+			res["ok"], res["error"] = false, tok
+		}
+	case "pasarguard":
+		tok := pm.MarzbanToken(p)
+		if _, okT := tok["access_token"]; okT {
+			st := pm.PasarGuardStats(p)
 			res["ok"], res["version"], res["users"] = true, st["version"], st["total_user"]
 		} else {
 			res["ok"], res["error"] = false, tok

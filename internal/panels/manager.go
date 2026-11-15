@@ -168,6 +168,8 @@ func (m *Manager) CreateUser(namePanel, username string, expire int64, dataLimit
 	switch p.S("type") {
 	case "marzban":
 		return m.marzbanCreate(p, username, expire, dataLimit, isTest)
+	case "pasarguard":
+		return m.pgCreate(p, username, expire, dataLimit, isTest)
 	case "marzneshin":
 		return m.marzneshinCreate(p, username, expire, dataLimit)
 	case "x-ui_single":
@@ -195,6 +197,8 @@ func (m *Manager) DataUser(namePanel, username string) Out {
 	switch p.S("type") {
 	case "marzban":
 		return m.marzbanData(p, username)
+	case "pasarguard":
+		return m.pgData(p, username)
 	case "marzneshin":
 		return m.marzneshinData(p, username)
 	case "x-ui_single":
@@ -219,6 +223,8 @@ func (m *Manager) RevokeSub(namePanel, username string) Out {
 	switch p.S("type") {
 	case "marzban":
 		return m.marzbanRevoke(p, username)
+	case "pasarguard":
+		return m.pgRevoke(p, username)
 	case "marzneshin":
 		return m.marzneshinRevoke(p, username)
 	case "x-ui_single":
@@ -239,6 +245,8 @@ func (m *Manager) RemoveUser(namePanel, username string) Out {
 	switch p.S("type") {
 	case "marzban":
 		return m.marzbanRemove(p, username)
+	case "pasarguard":
+		return m.pgRemove(p, username)
 	case "marzneshin":
 		return m.marzneshinRemove(p, username)
 	case "x-ui_single":
@@ -265,6 +273,8 @@ func (m *Manager) ResetUserDataUsage(namePanel, username string) {
 	switch p.S("type") {
 	case "marzban":
 		m.marzbanReset(p, username)
+	case "pasarguard":
+		m.pgReset(p, username)
 	case "marzneshin":
 		m.marzneshinReset(p, username)
 	case "x-ui_single":
@@ -288,6 +298,8 @@ func (m *Manager) Modifyuser(username, namePanel string, config map[string]any) 
 	switch p.S("type") {
 	case "marzban":
 		return Out(m.marzbanModify(p, username, config))
+	case "pasarguard":
+		return Out(m.pgModify(p, username, config))
 	case "marzneshin":
 		return m.marzneshinModify(p, username, config)
 	case "x-ui_single":
