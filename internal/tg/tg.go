@@ -5,6 +5,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"log"
@@ -13,6 +14,7 @@ import (
 	"net/url"
 	"regexp"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -61,8 +63,17 @@ type Response struct {
 
 func (c *Client) logf(format string, a ...any) {
 	if c.Log != nil {
-		c.Log.Printf(format, a...)
+		c.Log.Print(c.redact(fmt.Sprintf(format, a...)))
 	}
+}
+
+// redact hides the bot token: a failed request's error carries the whole
+// URL (https://api.telegram.org/bot<token>/method), and logs must not.
+func (c *Client) redact(s string) string {
+	if c.Token == "" {
+		return s
+	}
+	return strings.ReplaceAll(s, c.Token, "<token>")
 }
 
 // Call sends a method with JSON parameters. Nil values are dropped, the way
@@ -171,7 +182,7 @@ func (c *Client) do(method, contentType string, body io.Reader) Response {
 	resp, err := c.HTTP.Do(req)
 	if err != nil {
 		c.logf("tg %s: %v", method, err)
-		return Response{}
+		return Response{Description: c.redact(err.Error())}
 	}
 	defer resp.Body.Close()
 	raw, _ := io.ReadAll(io.LimitReader(resp.Body, 8<<20))
@@ -398,7 +409,7 @@ func (c *Client) DownloadFile(fileID string) ([]byte, string, error) {
 	_ = json.Unmarshal(r.Result, &f)
 	res, err := c.HTTP.Get(c.Base + "/file/bot" + c.Token + "/" + f.FilePath)
 	if err != nil {
-		return nil, "", err
+		return nil, "", errors.New(c.redact(err.Error()))
 	}
 	defer res.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(res.Body, 20<<20))

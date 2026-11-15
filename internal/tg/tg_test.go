@@ -1,8 +1,10 @@
 package tg
 
 import (
+	"bytes"
 	"encoding/json"
 	"io"
+	"log"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -54,5 +56,22 @@ func TestCallRetriesWithoutExtras(t *testing.T) {
 	c2 := &Client{Base: srv2.URL, Token: "t", HTTP: srv2.Client()}
 	if c2.Call("sendMessage", map[string]any{"chat_id": 1, "text": "x"}).OK || len(bodies) != 1 {
 		t.Fatalf("plain failure should not be retried (%d calls)", len(bodies))
+	}
+}
+
+func TestTokenNotLogged(t *testing.T) {
+	const token = "123456:SECRETsecretSECRETsecretSECRET12"
+	var buf bytes.Buffer
+	c := New(token, "http://127.0.0.1:1", "") // nothing listens: the request fails
+	c.Log = log.New(&buf, "", 0)
+	r := c.Call("sendMessage", map[string]any{"chat_id": 1, "text": "x"})
+	if r.OK {
+		t.Fatal("call to a closed port succeeded")
+	}
+	if strings.Contains(buf.String(), token) || strings.Contains(r.Description, token) {
+		t.Fatalf("token leaked: log %q, description %q", buf.String(), r.Description)
+	}
+	if !strings.Contains(buf.String(), "<token>") || r.Description == "" {
+		t.Fatalf("error not reported: log %q, description %q", buf.String(), r.Description)
 	}
 }
