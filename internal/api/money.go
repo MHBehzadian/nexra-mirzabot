@@ -160,7 +160,7 @@ func (a *API) getAutopay(w http.ResponseWriter, r *http.Request) {
 		"last_seen":   s.S("last_seen"),
 		"device":      s.S("device_info"),
 		"pairing":     b.AutopayPairing(),
-		"endpoint":    "https://" + b.Cfg.Domain + "/autopay.php",
+		"endpoint":    b.Cfg.URL("/autopay.php"),
 		"open_orders": rowsMap(d.MustQuery("SELECT id, id_user, base_price, amount, status, id_order, created_at FROM autopay_order WHERE status = 'open' ORDER BY id DESC LIMIT 20")),
 		"recent_sms":  rowsMap(d.MustQuery("SELECT id, sender, amount, direction, card, sent_at, received_at, status, id_order FROM autopay_sms ORDER BY id DESC LIMIT 20")),
 		"paid_count":  d.Count("SELECT COUNT(*) FROM autopay_order WHERE status = 'paid'"),

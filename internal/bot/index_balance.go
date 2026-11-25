@@ -54,7 +54,7 @@ func (c *Ctx) secBalance() bool {
 			c.sendHTML(c.fromID, T("users.Balance.linkpayments"), c.kbMain())
 			order := randHex(5)
 			c.insertPayment(order, "aqayepardakht", "Unpaid")
-			k := ik(row(tg.URLBtn(T("users.Balance.payments"), "https://"+c.b.Cfg.Domain+"/payment/aqayepardakht/aqayepardakht.php?price="+c.user.S("Processing_value")+"&order_id="+order)))
+			k := ik(row(tg.URLBtn(T("users.Balance.payments"), c.b.Cfg.URL("/payment/aqayepardakht/aqayepardakht.php?price=")+c.user.S("Processing_value")+"&order_id="+order)))
 			c.sendHTML(c.fromID, sprintf("users.moeny.aqayepardakht", order, nfs(c.user.S("Processing_value"))), k)
 		}
 		if c.datain == "nowpayments" {

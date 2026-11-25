@@ -321,7 +321,7 @@ func AutopayPriceNote(amount int64) string {
 // AutopayPairing is the "NXP1." string the Android app is paired with.
 func (b *Bot) AutopayPairing() string {
 	s := b.AutopaySettings()
-	return PairingString("https://"+b.Cfg.Domain+"/autopay.php", s.S("device_key"))
+	return PairingString(b.Cfg.URL("/autopay.php"), s.S("device_key"))
 }
 
 // PairingString is 'NXP1.' + unpadded base64url of {"u":..,"k":..}.

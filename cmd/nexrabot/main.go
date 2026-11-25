@@ -155,6 +155,13 @@ func cmdServe(args []string) {
 	if !cfg.DisableCrons {
 		b.RunCrons(stop)
 	}
+	pollCtx, stopPolling := context.WithCancel(context.Background())
+	polled := make(chan struct{})
+	if cfg.Polling() {
+		go func() { defer close(polled); b.Poll(pollCtx) }()
+	} else {
+		close(polled)
+	}
 	hs := srv.Run(cfg.Listen)
 	go func() {
 		logger.Printf("nexrabot %s listening on %s for @%s", bot.Version, cfg.Listen, cfg.BotUsername)
@@ -166,6 +173,8 @@ func cmdServe(args []string) {
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 	logger.Println("shutting down")
+	stopPolling()
+	<-polled // no more updates are queued after this
 	close(stop)
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
@@ -274,18 +283,26 @@ func cmdWebhook(args []string) {
 	fs := flag.NewFlagSet("set-webhook", flag.ExitOnError)
 	cfg := loadConfig(fs, args)
 	t := tg.New(cfg.BotToken, cfg.TelegramAPI, cfg.TelegramProxy)
-	r := t.SetWebhook("https://"+cfg.Domain+"/index.php", cfg.WebhookSecret)
+	if cfg.Polling() {
+		// the bot fetches its own updates; a webhook would stop that
+		if r := t.DeleteWebhook(); !r.OK {
+			die("deleteWebhook failed: %s", r.Description)
+		}
+		fmt.Println("no webhook: the bot polls Telegram for updates (UPDATES=polling)")
+		return
+	}
+	r := t.SetWebhook(cfg.URL("/index.php"), cfg.WebhookSecret)
 	if !r.OK {
 		die("setWebhook failed: %s", r.Description)
 	}
-	fmt.Println("webhook set to https://" + cfg.Domain + "/index.php")
+	fmt.Println("webhook set to " + cfg.URL("/index.php"))
 }
 
 func cmdKeys(args []string) {
 	fs := flag.NewFlagSet("keys", flag.ExitOnError)
 	cfg := loadConfig(fs, args)
 	fmt.Println("bot:          @" + cfg.BotUsername)
-	fmt.Println("api url:      https://" + cfg.Domain + "/api/v1")
+	fmt.Println("api url:      " + cfg.URL("/api/v1"))
 	fmt.Println("owner key:    " + cfg.APIOwnerKey)
 	fmt.Println("manager key:  " + cfg.APIManagerKey)
 }
@@ -440,7 +457,13 @@ func cmdInitConfig(args []string) {
 	fs.StringVar(&c.DBUser, "db-user", "", "database user")
 	fs.StringVar(&c.DBPass, "db-pass", os.Getenv("NEXRABOT_INIT_DB_PASS"), "database password (or NEXRABOT_INIT_DB_PASS)")
 	fs.StringVar(&c.Listen, "listen", "127.0.0.1:8080", "address to listen on")
+	fs.StringVar(&c.PublicURL, "public-url", "", "address the bot is reached at (default https://<domain>), e.g. http://1.2.3.4:18007")
+	polling := fs.Bool("polling", false, "fetch updates with getUpdates instead of a webhook (no domain or certificate needed)")
 	_ = fs.Parse(args)
+	if *polling {
+		c.Updates = "polling"
+	}
+	c.PublicURL = strings.TrimRight(c.PublicURL, "/")
 	if *out == "" || c.BotToken == "" || c.AdminID == "" || c.Domain == "" || c.DBName == "" || c.DBUser == "" {
 		die("--out, --token, --admin, --domain, --db-name and --db-user are required")
 	}

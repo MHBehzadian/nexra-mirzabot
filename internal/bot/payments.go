@@ -78,7 +78,7 @@ func tronRate() rates {
 func (b *Bot) nowPayments(endpoint string, amount float64, orderID, desc string) jmap {
 	body, _ := json.Marshal(map[string]any{
 		"price_amount": amount, "price_currency": "usd", "pay_currency": "trx", "order_id": orderID,
-		"order_description": desc, "ipn_callback_url": "https://" + b.Cfg.Domain + "/payment/nowpayments/back.php",
+		"order_description": desc, "ipn_callback_url": b.Cfg.URL("/payment/nowpayments/back.php"),
 	})
 	req, _ := http.NewRequest("POST", "https://api.nowpayments.io/v1/"+endpoint, bytes.NewReader(body))
 	req.Header.Set("x-api-key", b.DB.PaySetting("apinowpayment"))

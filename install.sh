@@ -7,6 +7,10 @@
 #     N=$(bash install.sh free-number) TOKEN='123:abc' DOMAIN='bot7.example.com' ADMIN='123456789' \
 #     NEXRA_SECRET='secret' CERT_EMAIL='you@example.com' EXTRA_ADMINS='987654321' bash install.sh
 #
+#   New bot with NO domain (runs on this server's IP and polls Telegram, so
+#   no DNS, nginx or certbot; MariaDB is installed if it is missing):
+#     N=$(bash install.sh free-number) TOKEN='123:abc' ADMIN='123456789' bash install.sh
+#
 #   Move a running PHP bot to Go (same database, same webhook, no downtime):
 #     N=7 bash install.sh migrate          # PHP_DIR=/var/www/html/botmirzapanel7 by default
 #
@@ -167,7 +171,7 @@ print_keys() { # N
     echo
     "$BIN" keys -c "$ETC/bot$1.env"
     echo
-    echo "Nexra Panel → Bot → افزودن ربات: address https://$(grep '^DOMAIN=' "$ETC/bot$1.env" | cut -d= -f2), and the two keys above."
+    echo "Nexra Panel → Bot → افزودن ربات: address $(bot_url "$1"), and the two keys above."
 }
 
 # ----------------------------------------------------------------- Nexra Panel
@@ -609,14 +613,14 @@ cmd_status() {
         [ -f "$f" ] || continue
         n=${f##*/bot}; n=${n%.env}
         case "$n" in ''|*[!0-9]*) continue ;; esac
-        dom=$(sed -n 's/^DOMAIN=//p' "$f"); user=$(sed -n 's/^BOT_USERNAME=//p' "$f")
+        dom=$(bot_url "$n"); user=$(sed -n 's/^BOT_USERNAME=//p' "$f")
         token=$(sed -n 's/^BOT_TOKEN=//p' "$f" | tr -d '"')
         state="Go, stopped"; systemctl is-active --quiet "nexrabot@$n" && state="Go, running"
         inpanel="no panel here"
         if [ "$urls" = "?" ]; then inpanel="panel login failed"
-        elif [ -n "$urls" ]; then grep -qx "https://$dom" <<< "$urls" && inpanel="yes" || inpanel="NO"; fi
+        elif [ -n "$urls" ]; then grep -qx "$dom" <<< "$urls" && inpanel="yes" || inpanel="NO"; fi
         name=$(tg_name "$token" "$(sed -n 's/^TELEGRAM_API=//p' "$f")")
-        printf '  bot %-3s %s (@%s)  https://%s  [%s]  in Nexra Panel: %s\n' "$n" "${name:-?}" "$user" "$dom" "$state" "$inpanel"
+        printf '  bot %-3s %s (@%s)  %s  [%s]  in Nexra Panel: %s\n' "$n" "${name:-?}" "$user" "$dom" "$state" "$inpanel"
     done
     for dir in $(mirza_dirs); do
         bot_for_dir "$dir" >/dev/null && systemctl is-active --quiet "nexrabot@$(bot_for_dir "$dir")" && continue
@@ -631,9 +635,131 @@ cmd_status() {
 
 # ----------------------------------------------------------------- new bot
 
+# public_ip: this server's public IPv4 address (PUBLIC_IP= overrides it)
+public_ip() {
+    local ip="${PUBLIC_IP:-}" u
+    if [ -z "$ip" ]; then
+        for u in https://api.ipify.org https://ipv4.icanhazip.com https://ifconfig.me/ip; do
+            ip=$(curl -4 -fsS -m 8 "$u" 2>/dev/null | tr -d '[:space:]') || true
+            [[ "$ip" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]] && break
+            ip=""
+        done
+    fi
+    [ -n "$ip" ] || ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    [ -n "$ip" ] || die "could not find this server's IP; set PUBLIC_IP="
+    echo "$ip"
+}
+
+# ensure_mysql: MariaDB, installed and running, if there is no MySQL yet
+ensure_mysql() {
+    if ! command -v mysql >/dev/null; then
+        command -v apt-get >/dev/null || die "mysql is not installed (and no apt-get to install MariaDB)"
+        say "installing MariaDB"
+        DEBIAN_FRONTEND=noninteractive apt-get update -qq
+        DEBIAN_FRONTEND=noninteractive apt-get install -y -qq mariadb-server >/dev/null
+    fi
+    systemctl is-active --quiet mariadb || systemctl is-active --quiet mysql ||
+        systemctl enable --now mariadb 2>/dev/null || systemctl enable --now mysql 2>/dev/null || true
+    mysql -N -e "SELECT 1" >/dev/null 2>&1 || die "mysql does not answer as root (is the database running?)"
+}
+
+# bot_url N: the address Nexra Panel and the Android app reach the bot at
+bot_url() {
+    local f="$ETC/bot$1.env" u
+    u=$(sed -n 's/^PUBLIC_URL=//p' "$f" | tail -1)
+    if [ -n "$u" ]; then echo "$u"; return; fi
+    echo "https://$(sed -n 's/^DOMAIN=//p' "$f" | tail -1)"
+}
+
+# cmd_new_ip: a new bot with no domain. It polls Telegram for its updates, so
+# no webhook, nginx or certificate is needed; Nexra Panel and the auto-confirm
+# app reach it at http://<server ip>:<port>.
+cmd_new_ip() {
+    N="${N:?set N= (bot number, e.g. 7)}"
+    TOKEN="${TOKEN:?set TOKEN= (bot token from @BotFather)}"
+    ADMIN="${ADMIN:?set ADMIN= (your numeric Telegram id)}"
+    NEXRA_SECRET="${NEXRA_SECRET:-$(openssl rand -hex 8)}"
+    DBPASS="${DBPASS:-$(openssl rand -hex 12)}"
+    BACKUP_MINUTE="${BACKUP_MINUTE:-$((RANDOM % 60))}"
+    EXTRA_ADMINS="${EXTRA_ADMINS:-}"
+    local DBNAME="mirzabot${N}" DBUSER="mirza${N}user" CFG="$ETC/bot${N}.env" PORT IP URL
+    PORT=$(port_for "$N")
+    [[ "$ADMIN" =~ ^[0-9]+$ ]] || die "ADMIN must be a numeric Telegram id"
+    [[ "$TOKEN" =~ ^[0-9]+:[A-Za-z0-9_-]+$ ]] || die "TOKEN does not look like a bot token"
+
+    [ -e "$CFG" ] && die "$CFG already exists; bot $N is installed"
+    grep -qxF "BOT_TOKEN=$TOKEN" "$ETC"/bot*.env 2>/dev/null && die "this token is already used by another bot here"
+    ss -ltn 2>/dev/null | grep -q ":$PORT " && die "port $PORT is already in use; pick another N"
+    ensure_mysql
+    [ -n "$(mysql -N -e "SHOW DATABASES LIKE '$DBNAME'")" ] && die "database $DBNAME already exists; pick another N (bash $0 free-number)"
+    [ -n "$(mysql -N -e "SELECT 1 FROM mysql.user WHERE User='$DBUSER'")" ] && die "database user $DBUSER already exists; pick another N"
+    IP=$(public_ip)
+    URL="http://$IP:$PORT"
+
+    install_binary
+    install_unit
+
+    say "resolving the bot username"
+    local BOT_USER
+    BOT_USER=$(curl -fsS "${NEXRABOT_TELEGRAM_API:-https://api.telegram.org}/bot$TOKEN/getMe" | grep -oP '"username":\s*"\K[^"]+' || true)
+    [ -n "$BOT_USER" ] || die "could not resolve the bot username; check the token (and that Telegram is reachable from this server)"
+
+    say "creating database $DBNAME"
+    mysql <<SQL
+CREATE DATABASE IF NOT EXISTS \`$DBNAME\` CHARACTER SET utf8mb4 COLLATE utf8mb4_general_ci;
+CREATE USER IF NOT EXISTS '$DBUSER'@'localhost' IDENTIFIED BY '$DBPASS';
+GRANT ALL PRIVILEGES ON \`$DBNAME\`.* TO '$DBUSER'@'localhost';
+FLUSH PRIVILEGES;
+SQL
+
+    say "writing $CFG"
+    NEXRABOT_INIT_DB_PASS="$DBPASS" "$BIN" init-config --out "$CFG" --token "$TOKEN" --admin "$ADMIN" \
+        --domain "$IP:$PORT" --public-url "$URL" --polling --bot-username "$BOT_USER" --secret "$NEXRA_SECRET" \
+        --db-name "$DBNAME" --db-user "$DBUSER" --listen "0.0.0.0:$PORT"
+    secure_config "$CFG"
+    "$BIN" schema -c "$CFG" >/dev/null
+    "$BIN" check -c "$CFG"
+    local a
+    for a in ${EXTRA_ADMINS//,/ }; do
+        case "$a" in '' | *[!0-9]*) warn "skipping admin id '$a' (not a number)"; continue ;; esac
+        mysql "$DBNAME" -e "INSERT IGNORE INTO admin (id_admin) VALUES ('$a')"
+        say "admin $a added"
+    done
+
+    say "starting nexrabot@$N"
+    systemctl enable --now "nexrabot@$N"
+    wait_healthy "http://127.0.0.1:$PORT/healthz" 20 || die "the bot did not start; see: journalctl -u nexrabot@$N"
+    "$BIN" set-webhook -c "$CFG" >/dev/null || warn "deleteWebhook failed; the bot clears it itself on start"
+    if command -v ufw >/dev/null && ufw status 2>/dev/null | grep -q '^Status: active'; then
+        ufw allow "$PORT/tcp" >/dev/null && say "firewall: port $PORT opened"
+    fi
+
+    say "hourly database backup to your Telegram"
+    cat > "/root/bot${N}_backup.sh" <<BACKUP
+#!/bin/bash
+FILE="/root/mirzabot${N}_\$(date +%Y%m%d_%H%M%S).sql.gz"
+$BIN db-dump -c $CFG --out "\$FILE" >/dev/null
+curl -s -F chat_id="$ADMIN" -F document=@"\$FILE" -F caption="بکاپ خودکار $BOT_USER 🗄" \\
+  "${NEXRABOT_TELEGRAM_API:-https://api.telegram.org}/bot$TOKEN/sendDocument" >/dev/null
+rm -f "\$FILE"
+BACKUP
+    chmod 700 "/root/bot${N}_backup.sh"
+    { crontab -l 2>/dev/null | grep -v "bot${N}_backup" || true; echo "$BACKUP_MINUTE * * * * bash /root/bot${N}_backup.sh"; } | crontab -
+
+    echo
+    echo "=========================================="
+    echo "done: @$BOT_USER on $URL (no domain: the bot polls Telegram)"
+    echo "database: $DBNAME / $DBUSER / $DBPASS"
+    print_keys "$N"
+    echo "=========================================="
+    register_with_panel "$N" || true
+}
+
 cmd_new() {
     N="${N:?set N= (bot number, e.g. 7)}"
     TOKEN="${TOKEN:?set TOKEN= (bot token from @BotFather)}"
+    # no domain: run on this server's IP instead
+    if [ -z "${DOMAIN:-}" ]; then cmd_new_ip; return; fi
     DOMAIN="${DOMAIN:?set DOMAIN= (domain of this bot, A record must already point here)}"
     ADMIN="${ADMIN:?set ADMIN= (your numeric Telegram id)}"
     NEXRA_SECRET="${NEXRA_SECRET:?set NEXRA_SECRET= (secret code that gates panel management)}"
@@ -719,7 +845,7 @@ curl -s -F chat_id="$ADMIN" -F document=@"\$FILE" -F caption="بکاپ خودک�
 rm -f "\$FILE"
 EOF
     chmod 700 "/root/bot${N}_backup.sh"
-    (crontab -l 2>/dev/null | grep -v "bot${N}_backup"; echo "$BACKUP_MINUTE * * * * bash /root/bot${N}_backup.sh") | crontab -
+    { crontab -l 2>/dev/null | grep -v "bot${N}_backup" || true; echo "$BACKUP_MINUTE * * * * bash /root/bot${N}_backup.sh"; } | crontab -
 
     echo
     echo "=========================================="

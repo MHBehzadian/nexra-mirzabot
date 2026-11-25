@@ -30,3 +30,28 @@ func TestWriteLoadRoundTrip(t *testing.T) {
 		t.Fatalf("mode changed to %v", st.Mode().Perm())
 	}
 }
+
+func TestPollingOnIPRoundTrip(t *testing.T) {
+	path := t.TempDir() + "/bot9.env"
+	in := &Config{BotToken: "1:x", AdminID: "5", Domain: "1.2.3.4:18009", DBName: "d", DBUser: "u",
+		Updates: "polling", PublicURL: "http://1.2.3.4:18009", Listen: "0.0.0.0:18009"}
+	if err := in.Write(path); err != nil {
+		t.Fatal(err)
+	}
+	out, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !out.Polling() || out.URL("/autopay.php") != "http://1.2.3.4:18009/autopay.php" {
+		t.Fatalf("got updates=%q url=%q", out.Updates, out.URL("/autopay.php"))
+	}
+	// a domain bot keeps the webhook and https://domain, and writes neither key
+	d := &Config{BotToken: "1:x", AdminID: "5", Domain: "bot.example.com", DBName: "d", DBUser: "u", PublicURL: "https://bot.example.com"}
+	if err := d.Write(path + "2"); err != nil {
+		t.Fatal(err)
+	}
+	out, _ = Load(path + "2")
+	if out.Polling() || out.URL("/x") != "https://bot.example.com/x" {
+		t.Fatalf("domain bot: updates=%q url=%q", out.Updates, out.URL("/x"))
+	}
+}

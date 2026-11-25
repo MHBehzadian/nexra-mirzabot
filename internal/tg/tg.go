@@ -172,7 +172,11 @@ func (c *Client) call(method string, params map[string]any) Response {
 }
 
 func (c *Client) do(method, contentType string, body io.Reader) Response {
-	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	return c.doCtx(context.Background(), method, contentType, body)
+}
+
+func (c *Client) doCtx(parent context.Context, method, contentType string, body io.Reader) Response {
+	ctx, cancel := context.WithTimeout(parent, 60*time.Second)
 	defer cancel()
 	req, err := http.NewRequestWithContext(ctx, "POST", c.Base+"/bot"+c.Token+"/"+method, body)
 	if err != nil {
@@ -414,6 +418,29 @@ func (c *Client) DownloadFile(fileID string) ([]byte, string, error) {
 	defer res.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(res.Body, 20<<20))
 	return b, res.Header.Get("Content-Type"), err
+}
+
+// DeleteWebhook stops Telegram posting updates, so getUpdates can fetch them.
+// Pending updates are kept.
+func (c *Client) DeleteWebhook() Response {
+	return c.Call("deleteWebhook", map[string]any{"drop_pending_updates": false})
+}
+
+// GetUpdates long-polls for updates after offset, waiting up to timeout
+// seconds. Cancelling ctx ends the wait at once.
+func (c *Client) GetUpdates(ctx context.Context, offset int64, timeout int) ([]Update, Response) {
+	body, _ := json.Marshal(map[string]any{
+		"offset": offset, "timeout": timeout, "allowed_updates": []string{"message", "callback_query"},
+	})
+	r := c.doCtx(ctx, "getUpdates", "application/json", bytes.NewReader(body))
+	if !r.OK {
+		return nil, r
+	}
+	var out []Update
+	if err := json.Unmarshal(r.Result, &out); err != nil {
+		return nil, Response{Description: err.Error()}
+	}
+	return out, r
 }
 
 func (c *Client) SetWebhook(u, secret string) Response {

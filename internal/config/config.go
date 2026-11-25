@@ -32,6 +32,7 @@ type Config struct {
 
 	Listen        string // address the HTTP server binds to
 	WebhookSecret string // Telegram secret_token, checked on every update
+	Updates       string // "webhook" (Telegram posts to PublicURL) or "polling" (getUpdates; no domain or certificate needed)
 	CheckTGIP     bool   // also accept updates only from Telegram's IP ranges
 	TelegramAPI   string // base URL, overridable for tests
 	APIOwnerKey   string // management API: everything
@@ -116,6 +117,7 @@ func Load(path string) (*Config, error) {
 		DBPass:        get("DB_PASS", ""),
 		Listen:        get("LISTEN", "127.0.0.1:8080"),
 		WebhookSecret: get("WEBHOOK_SECRET", ""),
+		Updates:       strings.ToLower(strings.TrimSpace(get("UPDATES", "webhook"))),
 		CheckTGIP:     get("CHECK_TELEGRAM_IP", "1") != "0",
 		TelegramAPI:   strings.TrimRight(get("TELEGRAM_API", "https://api.telegram.org"), "/"),
 		APIOwnerKey:   get("API_OWNER_KEY", ""),
@@ -131,6 +133,9 @@ func Load(path string) (*Config, error) {
 	c.Workers, _ = strconv.Atoi(get("WORKERS", "16"))
 	if c.Workers <= 0 {
 		c.Workers = 16
+	}
+	if c.Updates != "polling" {
+		c.Updates = "webhook"
 	}
 	if c.PublicURL == "" && c.Domain != "" {
 		c.PublicURL = "https://" + c.Domain
@@ -159,6 +164,19 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("missing settings: %s", strings.Join(missing, ", "))
 	}
 	return nil
+}
+
+// Polling reports whether the bot fetches its updates with getUpdates
+// instead of receiving them on a webhook: a bot on a bare IP, with no domain
+// and no certificate, works this way.
+func (c *Config) Polling() bool { return c.Updates == "polling" }
+
+// URL is the public address of path on this bot (PublicURL + path).
+func (c *Config) URL(path string) string {
+	if c.PublicURL == "" {
+		return "https://" + c.Domain + path
+	}
+	return c.PublicURL + path
 }
 
 // DSN is the go-sql-driver/mysql connection string.
@@ -203,6 +221,12 @@ func (c *Config) Write(path string) error {
 		"API_OWNER_KEY=" + c.APIOwnerKey,
 		"API_MANAGER_KEY=" + c.APIManagerKey,
 		"DATA_DIR=" + c.DataDir,
+	}
+	if c.Polling() {
+		lines = append(lines, "UPDATES=polling")
+	}
+	if c.PublicURL != "" && c.PublicURL != "https://"+c.Domain {
+		lines = append(lines, "PUBLIC_URL="+c.PublicURL)
 	}
 	if c.LegacyPHPDir != "" {
 		lines = append(lines, "LEGACY_PHP_DIR="+c.LegacyPHPDir)

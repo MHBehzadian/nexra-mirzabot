@@ -53,7 +53,7 @@ func (b *Bot) autopayPanelText() string {
 		"\nپرداخت‌های در انتظار واریز: " + itoa(open) + "\n" +
 		"پرداخت‌های خودکار تأییدشده: " + itoa(paid) + "\n" +
 		"پیامک‌های دریافتی: " + itoa(sms) + "\n\n" +
-		"آدرس سرور برای برنامه:\n<code>https://" + b.Cfg.Domain + "/autopay.php</code>"
+		"آدرس سرور برای برنامه:\n<code>" + b.Cfg.URL("/autopay.php") + "</code>"
 }
 
 func (b *Bot) autopayPanelKeyboard() *tg.InlineKeyboard {
