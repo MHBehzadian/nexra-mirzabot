@@ -268,6 +268,11 @@ cmd_panel_update() {
         (cd "$PANEL_DIR" && docker compose "${files[@]}" up -d --no-build --force-recreate "$PANEL_SERVICE")
         die "panel update failed; the old panel runs again (logs: docker logs $PANEL_C)"
     fi
+    # only the newest previous image is kept, so updates don't fill the disk
+    docker images --format '{{.Repository}}:{{.Tag}}' | grep '^nexra-panel-previous:' | grep -vxF "$old" |
+        xargs -r docker rmi >/dev/null 2>&1 || true
+    # and only the last 3 panel data backups
+    ls -1t "$BACKUPS"/panel-data-*.tar.gz 2>/dev/null | tail -n +4 | xargs -r rm -f
     say "Nexra Panel updated (previous image kept as $old)"
 }
 
