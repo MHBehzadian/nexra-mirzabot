@@ -139,7 +139,8 @@ func (c *Ctx) cardToCard() {
 	if len(digits) > 0 && php.Intval(c.setting.S("copy_cart")) == 1 {
 		k := ik(
 			row(B{Text: T("users.moeny.copy_card_number"), CopyText: &tg.CopyText{Text: strings.Join(digits, "")}},
-				B{Text: T("users.moeny.copy_price"), CopyText: &tg.CopyText{Text: c.user.S("Processing_value")}}),
+				// bank apps take the amount in rials, the message shows tomans
+				B{Text: T("users.moeny.copy_price"), CopyText: &tg.CopyText{Text: itoa(amount * 10)}}),
 			row(cb(T("users.backhome"), "backuser")),
 		)
 		c.edit(msg, k)
