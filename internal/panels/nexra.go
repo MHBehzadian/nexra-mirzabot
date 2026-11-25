@@ -3,6 +3,7 @@ package panels
 import (
 	"crypto/rand"
 	"fmt"
+	"log"
 	"net/url"
 	"strings"
 	"time"
@@ -70,6 +71,13 @@ func NexraErrorMessage(body map[string]any, fallback string) string {
 	return msg
 }
 
+// nexraWriteTimeout is how long a create/change waits for Nexra Panel.
+var nexraWriteTimeout = 45 * time.Second
+
+// nexraNoAnswer marks a result where Nexra Panel never answered (timeout,
+// connection lost): the change may still have been made.
+const nexraNoAnswer = "_no_answer"
+
 func (m *Manager) nexraRequest(panel db.Row, method, path string, payload any) map[string]any {
 	auth := m.NexraLogin(panel)
 	tok, ok := auth["access_token"].(string)
@@ -87,9 +95,16 @@ func (m *Manager) nexraRequest(panel db.Row, method, path string, payload any) m
 		body = marshal(payload)
 		ct = "application/json"
 	}
-	r := req{method: method, url: nexraBase(panel) + path, body: body, contentType: ct, headers: h, timeout: 10 * time.Second}.do()
+	// Nexra Panel makes the change on the panel behind it (Marzban, 3x-ui,
+	// Guard) before it answers, waiting up to 30s for that panel, so a change
+	// gets longer than a read.
+	timeout := 10 * time.Second
+	if method != "GET" {
+		timeout = nexraWriteTimeout
+	}
+	r := req{method: method, url: nexraBase(panel) + path, body: body, contentType: ct, headers: h, timeout: timeout}.do()
 	if r.err != nil {
-		return map[string]any{"detail": r.err.Error()}
+		return map[string]any{"detail": r.err.Error(), nexraNoAnswer: true}
 	}
 	return jsonObj(r.body)
 }
@@ -182,10 +197,28 @@ func (m *Manager) nexraCreate(panel db.Row, username string, expire int64, dataL
 		"expiry_time": exp, "total": dataLimit, "sub_id": username, "flow": "",
 	}
 	res := m.nexraRequest(panel, "POST", "/admin/user", payload)
-	if v, _ := res["success"].(bool); !v {
-		return unsuccessful(NexraErrorMessage(res, "خطا در ساخت یوزر روی Nexra"))
+	ok, _ := res["success"].(bool)
+	var created map[string]any
+	if !ok && res[nexraNoAnswer] == true {
+		// no answer in time: the panel may have made the user anyway, so
+		// look for it before calling it a failure (a retry would then hit a
+		// taken username, and the user would sit on the panel unsold)
+		created = m.nexraDirectGetUser(panel, username)
+		ok = isset(created, "username") && !isset(created, "detail")
+		if ok {
+			log.Printf("nexra %s: create %s got no answer (%v) but the user exists; taking it as made", panel.S("name_panel"), username, res["detail"])
+		}
 	}
-	created := m.nexraDirectGetUser(panel, username)
+	if !ok {
+		msg := NexraErrorMessage(res, "خطا در ساخت یوزر روی Nexra")
+		if res[nexraNoAnswer] == true {
+			msg = fmt.Sprintf("Nexra Panel در %d ثانیه جواب نداد (پنل یا سرور پشت آن کند یا در دسترس نیست): %s", int(nexraWriteTimeout.Seconds()), msg)
+		}
+		return unsuccessful(msg)
+	}
+	if created == nil {
+		created = m.nexraDirectGetUser(panel, username)
+	}
 	if isset(created, "detail") || !isset(created, "username") {
 		return Out{"status": "successful", "username": username, "subscription_url": "", "configs": []string{}}
 	}

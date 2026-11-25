@@ -21,7 +21,7 @@ import (
 )
 
 // Version is shown on the admin login message ($version in PHP).
-var Version = "6.0.12-go"
+var Version = "6.0.13-go"
 
 type Bot struct {
 	Cfg *config.Config
