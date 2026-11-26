@@ -306,6 +306,12 @@ func cmdAutopayTest(args []string) {
 		"انتقال از 6219-****-1234\nبستانکار 1,253,000 ریال\nساعت 14:02",
 	}
 	if sub == "parse" {
+		// your own bank's SMS: nexrabot autopay-test parse < sms.txt
+		if st, err := os.Stdin.Stat(); err == nil && st.Mode()&os.ModeCharDevice == 0 {
+			if in, err := io.ReadAll(os.Stdin); err == nil && strings.TrimSpace(string(in)) != "" {
+				samples = []string{string(in)}
+			}
+		}
 		for i, s := range samples {
 			p := bot.ParseSMS(s)
 			fmt.Printf("--- sample %d\n   direction : %s\n   amount    : %s toman\n   candidates: %v\n   card      : %s\n", i+1, p.Direction, php.NumberFormat(float64(p.Amount), 0), p.Candidates, p.Card)

@@ -144,6 +144,7 @@ class ForwardService : Service() {
                     val sender = c.getString(0) ?: ""
                     val body = c.getString(1) ?: ""
                     val date = c.getLong(2)
+                    if (!SmsReceiver.senderAllowed(this, sender)) continue
                     if (!SmsReceiver.looksLikeBank(body)) continue
                     if (store.enqueue(sender, body, stamp.format(Date(date)))) added++
                 }

@@ -59,6 +59,11 @@ func autopayDigits(s string) string {
 	return r.Replace(s)
 }
 
+// smsLetters writes Arabic-keyboard letters the Persian way (many banks send
+// "واريز" / "ريال" with the Arabic yeh) and drops the invisible joiners, so
+// one word list reads every bank.
+var smsLetters = strings.NewReplacer("ي", "ی", "ى", "ی", "ك", "ک", "ة", "ه", "\u200c", " ", "\u200d", "", "\u200f", "", "\u200e", "", "\u202b", "", "\u202c", "")
+
 // ParsedSMS is autopay_parse_sms()'s result.
 type ParsedSMS struct {
 	Direction  string
@@ -73,11 +78,14 @@ var (
 	reDeposit = regexp.MustCompile(`(?:واریز|وار.ز|بستانکار|افزایش|افزايش)[^\d]{0,20}(\d{3,})`)
 	reNum3    = regexp.MustCompile(`\d{3,}`)
 	reCard    = regexp.MustCompile(`(\d{4})\s*\*{2,}|\*{2,}\s*(\d{4})`)
+	// some banks write only a sign before the amount: "+1,000,000" / "1,000,000+"
+	reSignIn  = regexp.MustCompile(`(?:^|[\s:])\+\s?(\d{3,})|(\d{3,})\s?\+(?:$|[\s])`)
+	reSignOut = regexp.MustCompile(`(?:^|[\s:])[-−]\s?(\d{3,})|(\d{3,})\s?[-−](?:$|[\s])`)
 )
 
 // ParseSMS pulls direction, amount candidates and card tail out of a bank SMS.
 func ParseSMS(raw string) ParsedSMS {
-	flat := reSpace.ReplaceAllString(autopayDigits(raw), " ")
+	flat := reSpace.ReplaceAllString(autopayDigits(smsLetters.Replace(raw)), " ")
 	out := ParsedSMS{Direction: "unknown", Candidates: []int64{}}
 	for _, w := range []string{"برداشت", "بدهکار", "خريد", "خرید", "انتقال به", "کارمزد", "withdraw", "debit", "purchase"} {
 		if strings.Contains(flat, w) {
@@ -95,7 +103,17 @@ func ParseSMS(raw string) ParsedSMS {
 	}
 	hunting := reBalance.ReplaceAllString(flat, " ")
 	var amount int64
-	if m := reDeposit.FindStringSubmatch(hunting); m != nil {
+	if out.Direction == "unknown" {
+		// no word for it: "+amount" is money in, "-amount" money out
+		// (12+ digits after a "+" is a phone number like +98912..., not money)
+		if m := reSignIn.FindStringSubmatch(hunting); m != nil && len(m[1]+m[2]) <= 11 {
+			out.Direction = "in"
+			amount = php.Intval(m[1] + m[2])
+		} else if reSignOut.MatchString(hunting) {
+			out.Direction = "out"
+		}
+	}
+	if m := reDeposit.FindStringSubmatch(hunting); amount == 0 && m != nil {
 		amount = php.Intval(m[1])
 	}
 	if amount == 0 {
